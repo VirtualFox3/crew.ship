@@ -1,0 +1,18 @@
+{
+  "name": "packhost-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pack.Host node agent — runs Minecraft servers in Docker and exposes them to the panel.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.9",
+    "express": "^5.1.0",
+    "tar": "^7.5.1",
+    "ws": "^8.18.3"
+  }
+}

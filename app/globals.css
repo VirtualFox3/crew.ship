@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #07090c;
+  --color-ink-900: #0b0f14;
+  --color-ink-850: #0f141b;
+  --color-ink-800: #141b24;
+  --color-ink-700: #1c2632;
+  --color-ink-600: #2a3644;
+  --color-ink-500: #3d4c5e;
+  --color-ink-400: #6b7c91;
+  --color-ink-300: #97a6ba;
+  --color-ink-200: #c7d2e0;
+  --color-ink-100: #e8eef6;
+
+  --color-grass-50: #ecfdf3;
+  --color-grass-300: #6ee7a3;
+  --color-grass-400: #37d67f;
+  --color-grass-500: #16bf68;
+  --color-grass-600: #0f9d55;
+  --color-grass-700: #0b7a43;
+
+  --color-lava-400: #ff7a45;
+  --color-lava-500: #f4531f;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-100);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+/* Subtle grid + glow used behind hero and empty states. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.glow-grass {
+  background: radial-gradient(
+    60% 60% at 50% 0%,
+    rgba(22, 191, 104, 0.22) 0%,
+    rgba(22, 191, 104, 0) 70%
+  );
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-700);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-600);
+  background-clip: content-box;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-rise {
+  animation: rise 0.4s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-dot,
+  .animate-rise {
+    animation: none;
+  }
+}

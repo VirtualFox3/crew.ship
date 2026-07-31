@@ -1,0 +1,20 @@
+services:
+  agent:
+    build: .
+    container_name: packhost-agent
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Control API the panel talks to. Put a TLS terminator in front of this.
+      - "8080:8080"
+      # Minecraft servers. TCP for Java, UDP for Bedrock and Geyser.
+      - "25600-25999:25600-25999/tcp"
+      - "25600-25999:25600-25999/udp"
+    volumes:
+      # The agent creates sibling containers, so it needs the Docker socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Worlds, plugins and backups. Must be the same path inside and out,
+      # because the paths in bind mounts are resolved by the host's daemon.
+      - /var/lib/packhost:/var/lib/packhost
+    environment:
+      DATA_DIR: /var/lib/packhost
