@@ -20,7 +20,7 @@ that free hosts normally use as upsell pressure.
 ## What's in here
 
 ```
-.                     Next.js 15 panel — deploys to Vercel or Cloudflare Pages
+.                     Next.js 15 panel — deploys to Vercel or Cloudflare Workers
 ├── app/              Pages, and the REST API the panel calls
 ├── components/       UI kit and the feature components
 ├── lib/              Domain logic: software catalogue, versions, add-ons, placement
@@ -28,8 +28,8 @@ that free hosts normally use as upsell pressure.
 └── agent/            Node daemon that runs the actual Minecraft servers in Docker
 ```
 
-The split matters: **Vercel and Cloudflare Pages cannot host a Minecraft
-server.** They run request-scoped functions, not long-lived TCP processes with
+The split matters: **Vercel and Cloudflare cannot host a Minecraft server.**
+They run request-scoped functions, not long-lived TCP processes with
 gigabytes of resident world data. So the panel deploys there, and one or more
 *nodes* — ordinary Linux boxes running `agent/` — do the hosting. The panel
 talks to them over an authenticated HTTPS API, and the browser streams the

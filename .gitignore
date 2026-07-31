@@ -9,3 +9,7 @@ build/
 next-env.d.ts
 agent/node_modules/
 agent/data/
+.open-next/
+.wrangler/
+.dev.vars
+.env.production

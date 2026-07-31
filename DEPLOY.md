@@ -69,18 +69,47 @@ Redeploy so the new variables are picked up. Until they are set, the site
 serves the landing page and shows a setup notice inside the panel instead of
 erroring.
 
-### Cloudflare Pages
+### Cloudflare Workers
 
-Pages needs the OpenNext adapter to run a Next.js app with server components:
+The adapter is already wired up: `open-next.config.ts`, `wrangler.jsonc` and
+three `cf:*` npm scripts are committed. `nodejs_compat` is on because the panel
+signs agent tokens with `node:crypto`.
 
-```bash
-npm i -D @opennextjs/cloudflare wrangler
-npx opennextjs-cloudflare build
-npx wrangler deploy
+**Config splits in two, and getting this backwards is the one thing that will
+bite you.** `next build` inlines every `NEXT_PUBLIC_*` value into the browser
+bundle, so those have to exist *at build time* — `wrangler secret put` runs too
+late and the login form ends up pointed at an empty URL. The two real secrets
+are read on the server at request time and must **not** be baked into a bundle.
+
+Build-time — create `.env.production` (gitignored):
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
+NEXT_PUBLIC_SERVER_DOMAIN=pack.host
 ```
 
-Set the same variables with `npx wrangler secret put <NAME>`. Everything else
-is identical.
+Runtime — store as encrypted secrets:
+
+```bash
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler secret put AGENT_SHARED_SECRET
+```
+
+Then authenticate and ship:
+
+```bash
+npx wrangler login          # or export CLOUDFLARE_API_TOKEN=...
+npm run cf:deploy
+```
+
+`npm run cf:preview` runs the identical bundle locally in workerd first, which
+is worth doing once — it catches anything that works under Node but not on
+Workers. Use `.dev.vars` (same keys, gitignored) to feed the preview.
+
+The anon key is designed to be public and ships to browsers by design; row-level
+security is what protects the data. The service role key and agent secret are
+not — keep them in `wrangler secret`.
 
 > Neither platform can run the Minecraft servers themselves — that is what the
 > node in step 3 is for.
