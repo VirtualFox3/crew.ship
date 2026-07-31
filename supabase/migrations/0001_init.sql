@@ -1,5 +1,8 @@
 -- Pack.Host — core schema
 -- Free, unlimited Minecraft server hosting (Java + Bedrock).
+--
+-- Run this first, then 0003_harden_functions.sql, which moves the SECURITY
+-- DEFINER helpers out of the PostgREST-exposed `public` schema.
 
 create extension if not exists "pgcrypto";
 create extension if not exists "citext";
