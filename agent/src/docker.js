@@ -59,7 +59,7 @@ async function pullImage(image) {
  * for every TYPE/VERSION pair itself, which is what makes "any version, any
  * software" a one-line change here rather than a download matrix.
  */
-function javaEnv(spec, password) {
+export function javaEnv(spec, password) {
   const env = {
     EULA: "TRUE",
     TYPE: spec.type,
@@ -105,7 +105,7 @@ function javaEnv(spec, password) {
   return env;
 }
 
-function bedrockEnv(spec) {
+export function bedrockEnv(spec) {
   return {
     EULA: "TRUE",
     VERSION: spec.version,
@@ -118,6 +118,33 @@ function bedrockEnv(spec) {
     VIEW_DISTANCE: spec.properties["view-distance"] ?? "10",
     LEVEL_SEED: spec.properties["level-seed"] ?? "",
   };
+}
+
+/**
+ * Container-internal ports and their host bindings.
+ *
+ * Java always listens on 25565/tcp. Geyser (crossplay) and native Bedrock both
+ * listen on 19132/udp — the difference is only which image is running, so both
+ * map that same container port out to the server's allocated bedrock port.
+ */
+export function portConfig(spec) {
+  const exposed = {};
+  const bindings = {};
+
+  if (spec.edition === "bedrock") {
+    exposed["19132/udp"] = {};
+    bindings["19132/udp"] = [{ HostPort: String(spec.bedrockPort ?? spec.javaPort) }];
+    return { exposed, bindings };
+  }
+
+  exposed["25565/tcp"] = {};
+  bindings["25565/tcp"] = [{ HostPort: String(spec.javaPort) }];
+
+  if (spec.crossplay && spec.bedrockPort) {
+    exposed["19132/udp"] = {};
+    bindings["19132/udp"] = [{ HostPort: String(spec.bedrockPort) }];
+  }
+  return { exposed, bindings };
 }
 
 const toEnvArray = (obj) =>
@@ -143,21 +170,7 @@ export async function ensureContainer(spec) {
 
   const env = bedrock ? bedrockEnv(spec) : javaEnv(spec, password);
 
-  const exposed = {};
-  const bindings = {};
-
-  if (!bedrock) {
-    exposed["25565/tcp"] = {};
-    bindings["25565/tcp"] = [{ HostPort: String(spec.javaPort) }];
-    if (spec.crossplay && spec.bedrockPort) {
-      // Geyser listens on UDP 19132 inside the container.
-      exposed["19132/udp"] = {};
-      bindings["19132/udp"] = [{ HostPort: String(spec.bedrockPort) }];
-    }
-  } else {
-    exposed["19132/udp"] = {};
-    bindings["19132/udp"] = [{ HostPort: String(spec.bedrockPort ?? spec.javaPort) }];
-  }
+  const { exposed, bindings } = portConfig(spec);
 
   const existing = await getContainer(spec.id);
   if (existing) {

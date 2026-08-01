@@ -3,11 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Pack.Host node agent — runs Minecraft servers in Docker and exposes them to the panel.",
-  "engines": { "node": ">=20" },
+  "description": "Pack.Host node agent \u2014 runs Minecraft servers in Docker and exposes them to the panel.",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "dockerode": "^4.0.9",
