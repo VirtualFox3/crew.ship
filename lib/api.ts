@@ -67,13 +67,23 @@ export interface ServerContext {
 }
 
 /**
- * Loads a server the caller may touch. RLS already restricts reads to owned and
- * shared servers, so a miss here is genuinely a 404 for this user; `manage`
- * additionally rejects viewers, who can watch but not act.
+ * Loads a server the caller may touch.
+ *
+ * RLS already restricts reads to owned and shared servers, so a miss here is
+ * genuinely a 404 for this user. Two further levels sit on top:
+ *
+ * - `manage`     day-to-day operation: console, players, add-ons, files,
+ *                backups, power. Admins and moderators.
+ * - `administer` changes the shape of the server: settings, software, version,
+ *                worlds. Owner and admins only.
+ *
+ * The split exists because the invite UI promises moderators cannot change
+ * settings, and a permission that is described but not enforced is worse than
+ * one that was never offered.
  */
 export async function serverContext(
   serverId: string,
-  { manage = false } = {},
+  { manage = false, administer = false } = {},
 ): Promise<ServerContext> {
   const { user, supabase } = await requireUser();
 
@@ -85,7 +95,7 @@ export async function serverContext(
 
   if (!server) throw new ApiError("Server not found.", 404);
 
-  if (manage && server.owner_id !== user.id) {
+  if ((manage || administer) && server.owner_id !== user.id) {
     const { data: access } = await supabase
       .from("server_access")
       .select("role")
@@ -93,8 +103,15 @@ export async function serverContext(
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (!access || !["admin", "moderator"].includes(access.role)) {
-      throw new ApiError("You have view-only access to this server.", 403);
+    const allowed = administer ? ["admin"] : ["admin", "moderator"];
+
+    if (!access || !allowed.includes(access.role)) {
+      throw new ApiError(
+        access?.role === "moderator"
+          ? "Moderators cannot change server settings. Ask an admin."
+          : "You have view-only access to this server.",
+        403,
+      );
     }
   }
 

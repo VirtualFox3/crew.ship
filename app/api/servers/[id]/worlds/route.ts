@@ -26,7 +26,7 @@ export const GET = handler(async (_request: Request, { params }: Params) => {
 /** Reset (regenerate) or switch the active world. */
 export const POST = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { administer: true });
   const node = requireNode(ctx);
 
   const body = await readJson<{ action?: string; world?: string; seed?: string }>(request);

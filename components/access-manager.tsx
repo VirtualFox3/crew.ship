@@ -24,8 +24,9 @@ interface Member {
 }
 
 const ROLE_BLURB: Record<string, string> = {
-  admin: "Everything except deleting the server.",
-  moderator: "Console, players, plugins and files. No settings changes.",
+  admin: "Everything except deleting the server or inviting people.",
+  moderator:
+    "Start/stop, console, players, plugins, files and backups. Cannot change settings, software, version or worlds.",
   viewer: "Read-only: status, console output and player list.",
 };
 
