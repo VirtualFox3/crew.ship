@@ -18,14 +18,21 @@ import { api, errorMessage } from "@/lib/client-api";
 import { createClient } from "@/lib/supabase/client";
 import { softwareInfo } from "@/lib/software";
 import { cn, timeAgo } from "@/lib/utils";
-import type { Server } from "@/lib/types";
+import { ADDRESS_HINT, resolveAddress, type ResolvedAddress } from "@/lib/address";
+import type { Node, Server } from "@/lib/types";
+
+/** The parts of a node the browser needs to render an address. */
+export type NodeAddressInfo = Pick<Node, "public_host" | "tunnel_host" | "tunnel_ports">;
 
 export function ServerList({
   initialServers,
   domain,
+  nodes,
 }: {
   initialServers: Server[];
   domain: string;
+  /** Keyed by node id. Servers not yet placed simply have no entry. */
+  nodes: Record<string, NodeAddressInfo>;
 }) {
   const [servers, setServers] = useState(initialServers);
   const [busy, setBusy] = useState<string | null>(null);
@@ -115,6 +122,7 @@ export function ServerList({
           key={server.id}
           server={server}
           domain={domain}
+          node={server.node_id ? (nodes[server.node_id] ?? null) : null}
           busy={busy === server.id}
           onPower={power}
         />
@@ -126,11 +134,13 @@ export function ServerList({
 function ServerRow({
   server,
   domain,
+  node,
   busy,
   onPower,
 }: {
   server: Server;
   domain: string;
+  node: NodeAddressInfo | null;
   busy: boolean;
   onPower: (server: Server, action: "start" | "stop") => void;
 }) {
@@ -165,7 +175,7 @@ function ServerRow({
           </div>
         </Link>
 
-        <Address server={server} domain={domain} />
+        <Address address={resolveAddress(server, node, domain)} />
 
         <div className="flex items-center gap-2">
           {running ? (
@@ -196,20 +206,13 @@ function ServerRow({
 }
 
 export function Address({
-  server,
-  domain,
+  address,
   className,
 }: {
-  server: Pick<Server, "subdomain" | "custom_domain" | "java_port" | "bedrock_port" | "edition">;
-  domain: string;
+  address: ResolvedAddress;
   className?: string;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
-  const host = server.custom_domain ?? `${server.subdomain}.${domain}`;
-
-  // A SRV record hides the port for Java; Bedrock clients always need one.
-  const java = server.java_port && server.java_port !== 25565 ? `${host}:${server.java_port}` : host;
-  const bedrock = server.bedrock_port ? `${host}:${server.bedrock_port}` : null;
 
   async function copy(value: string, key: string) {
     try {
@@ -221,39 +224,40 @@ export function Address({
     }
   }
 
+  if (!address.java && !address.bedrock) {
+    return (
+      <p className={cn("text-xs text-ink-500", className)}>
+        {ADDRESS_HINT.unassigned}
+      </p>
+    );
+  }
+
+  const rows: { key: string; label: string; tone: "grass" | "violet"; value: string }[] = [];
+  if (address.java) rows.push({ key: "java", label: "Java", tone: "grass", value: address.java });
+  if (address.bedrock) {
+    rows.push({ key: "bedrock", label: "Bedrock", tone: "violet", value: address.bedrock });
+  }
+
   return (
     <div className={cn("flex flex-col gap-1", className)}>
-      {server.edition !== "bedrock" && (
+      {rows.map((row) => (
         <button
-          onClick={() => copy(java, "java")}
+          key={row.key}
+          onClick={() => copy(row.value, row.key)}
           className="group flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600"
-          title="Copy Java address"
+          title={ADDRESS_HINT[address.via] ?? `Copy ${row.label} address`}
         >
-          <Badge tone="grass" className="px-1.5 py-0">Java</Badge>
-          <span className="truncate">{java}</span>
-          {copied === "java" ? (
+          <Badge tone={row.tone} className="px-1.5 py-0">
+            {row.label}
+          </Badge>
+          <span className="truncate">{row.value}</span>
+          {copied === row.key ? (
             <Check className="size-3.5 shrink-0 text-grass-400" />
           ) : (
             <Copy className="size-3.5 shrink-0 text-ink-500 group-hover:text-ink-300" />
           )}
         </button>
-      )}
-
-      {bedrock && (
-        <button
-          onClick={() => copy(bedrock, "bedrock")}
-          className="group flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600"
-          title="Copy Bedrock address"
-        >
-          <Badge tone="violet" className="px-1.5 py-0">Bedrock</Badge>
-          <span className="truncate">{bedrock}</span>
-          {copied === "bedrock" ? (
-            <Check className="size-3.5 shrink-0 text-grass-400" />
-          ) : (
-            <Copy className="size-3.5 shrink-0 text-ink-500 group-hover:text-ink-300" />
-          )}
-        </button>
-      )}
+      ))}
     </div>
   );
 }

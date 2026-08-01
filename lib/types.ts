@@ -51,6 +51,10 @@ export interface Node {
   arch: NodeArch;
   agent_url: string;
   public_host: string;
+  /** Relay hostname when the node is behind a tunnel (playit.gg etc). */
+  tunnel_host: string | null;
+  /** Node-local port -> relay-published port. */
+  tunnel_ports: Record<string, number>;
   status: "online" | "draining" | "offline";
   max_servers: number;
   max_memory_mb: number;

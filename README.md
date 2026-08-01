@@ -47,6 +47,8 @@ console straight from the node over a WebSocket.
 - Switch software or version at any time without losing the world
 - Java, Bedrock, or both at once via Geyser + Floodgate crossplay
 - 1–16 GB RAM, up to 1000 player slots, 20 GB storage
+- playit.gg tunnels built in: a node needs no public IP, no domain and no port
+  forwarding, so a home machine works
 
 **Add-ons — no cap**
 - Search and one-click install from Modrinth, Hangar and SpigotMC

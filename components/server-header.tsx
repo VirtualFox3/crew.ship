@@ -8,16 +8,17 @@ import { Address } from "@/components/server-list";
 import { api, errorMessage } from "@/lib/client-api";
 import { createClient } from "@/lib/supabase/client";
 import { softwareInfo } from "@/lib/software";
+import { ADDRESS_HINT, type ResolvedAddress } from "@/lib/address";
 import type { Server } from "@/lib/types";
 
 /** Status + power controls, kept live over Supabase realtime. */
 export function ServerHeader({
   initialServer,
-  domain,
+  address,
   nodeName,
 }: {
   initialServer: Server;
-  domain: string;
+  address: ResolvedAddress;
   nodeName: string | null;
 }) {
   const router = useRouter();
@@ -88,7 +89,7 @@ export function ServerHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Address server={server} domain={domain} />
+          <Address address={address} />
 
           {offline ? (
             <Button loading={busy === "start"} onClick={() => power("start")}>
@@ -134,6 +135,10 @@ export function ServerHeader({
       </div>
 
       {error && <Alert tone="error">{error}</Alert>}
+
+      {ADDRESS_HINT[address.via] && server.status !== "offline" && (
+        <p className="text-xs text-ink-500">{ADDRESS_HINT[address.via]}</p>
+      )}
 
       {server.status === "queued" && (
         <Alert tone="info" title={`Queue position ${server.queue_position ?? "—"}`}>
