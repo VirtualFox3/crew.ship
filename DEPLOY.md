@@ -54,20 +54,29 @@ npx vercel --prod
 Or import the repository at [vercel.com/new](https://vercel.com/new). It is a
 stock Next.js app — no build configuration needed.
 
-Then set the environment variables (Project → Settings → Environment
-Variables), for Production **and** Preview:
+The three public values already ship in the committed `.env.production`, so
+accounts work on the first deploy with nothing configured. Only the two real
+secrets need to go in Project → Settings → Environment Variables, for
+Production **and** Preview:
 
 ```
-NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
 SUPABASE_SERVICE_ROLE_KEY=<service role key>
 AGENT_SHARED_SECRET=<openssl rand -base64 48>
-NEXT_PUBLIC_SERVER_DOMAIN=pack.host
 ```
 
-Redeploy so the new variables are picked up. Until they are set, the site
-serves the landing page and shows a setup notice inside the panel instead of
-erroring.
+Redeploy so they are picked up. Until they are set: the landing page, signup,
+login, the dashboard and creating a server all work, but starting or managing
+a server returns a clear "Missing SUPABASE_SERVICE_ROLE_KEY" error rather than
+failing silently.
+
+To point the panel at a different Supabase project, either edit
+`.env.production` or set the same `NEXT_PUBLIC_*` names in the dashboard —
+real environment variables take precedence over the file.
+
+> **Deployment protection.** A new Vercel project often has Vercel
+> Authentication switched on, which makes the site visible only to your team.
+> For a public hosting panel, turn it off under Settings → Deployment
+> Protection, or nobody can sign up.
 
 ### Cloudflare Workers
 
@@ -138,6 +147,27 @@ is the hostname players connect to. `status` flips to `online` on the agent's
 first heartbeat.
 
 ### Install the agent
+
+One command does the whole thing — installs Docker, sizes capacity from the
+box's RAM, writes the config, opens the firewall, starts the agent, waits for
+it to report healthy, then prints the exact SQL to register the node and the
+Caddy snippet for TLS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/VirtualFox3/Pack.Host/main/agent/install.sh | sudo bash
+```
+
+It generates the node's UUID locally, so you run one SQL statement at the end
+rather than inserting a row first to get an id. To run it unattended:
+
+```bash
+PANEL_URL=https://packhost.vercel.app \
+AGENT_SHARED_SECRET=... \
+PUBLIC_HOST=node1.example.com \
+  sudo -E bash agent/install.sh
+```
+
+Or do it by hand:
 
 ```bash
 git clone <this repo> packhost && cd packhost/agent
