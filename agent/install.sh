@@ -54,8 +54,23 @@ MAX_MEMORY_MB="${MAX_MEMORY_MB:-$(( TOTAL_MB - RESERVE_MB ))}"
 MAX_SERVERS="${MAX_SERVERS:-$(( MAX_MEMORY_MB / 1536 ))}"
 [ "$MAX_SERVERS" -lt 1 ] && MAX_SERVERS=1
 
+# Architecture decides which server software this node can host. The agent
+# reports it on every heartbeat and the panel greys out the rest.
+case "$(uname -m)" in
+  x86_64|amd64) ARCH=x64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) die "Unsupported CPU architecture: $(uname -m). Nodes need x86_64 or arm64." ;;
+esac
+
+info "CPU architecture         : ${ARCH} ($(uname -m))"
 info "RAM available to servers : ${MAX_MEMORY_MB} MB of ${TOTAL_MB} MB"
 info "Server slots             : ${MAX_SERVERS}"
+
+if [ "$ARCH" = "arm64" ]; then
+  warn "ARM node: Java servers (Paper, Fabric, Forge...) all work."
+  warn "Mojang ships no ARM build of the Bedrock server, so native Bedrock is"
+  warn "unavailable here. Bedrock players can still join via Geyser crossplay."
+fi
 
 # ---------------------------------------------------------------------------
 # Config
@@ -178,6 +193,33 @@ else
   warn "  ${PORT}/tcp, and ${PORT_RANGE_START}-${PORT_RANGE_END} on BOTH tcp and udp"
 fi
 
+# Oracle Cloud images ship an iptables REJECT rule that drops everything except
+# SSH, and it survives reboots via netfilter-persistent. It is the single most
+# common reason an Oracle node looks dead from the outside while the agent
+# reports perfectly healthy locally.
+if [ -d /etc/iptables ] || (command -v iptables >/dev/null 2>&1 && iptables -S INPUT 2>/dev/null | grep -q "REJECT"); then
+  bold "Oracle-style iptables rules detected — opening ports there too"
+  iptables -I INPUT -p tcp --dport "${PORT}" -j ACCEPT 2>/dev/null || true
+  iptables -I INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+  iptables -I INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+  iptables -I INPUT -p tcp --dport "${PORT_RANGE_START}:${PORT_RANGE_END}" -j ACCEPT 2>/dev/null || true
+  iptables -I INPUT -p udp --dport "${PORT_RANGE_START}:${PORT_RANGE_END}" -j ACCEPT 2>/dev/null || true
+
+  if command -v netfilter-persistent >/dev/null 2>&1; then
+    netfilter-persistent save >/dev/null 2>&1 || true
+    info "Saved iptables rules so they survive a reboot"
+  else
+    warn "Could not persist iptables rules — they will be lost on reboot."
+    warn "Install iptables-persistent to keep them."
+  fi
+
+  warn "Oracle blocks ports in TWO places. The instance firewall is now open,"
+  warn "but you must ALSO allow them in the Cloud console:"
+  warn "  Networking > Virtual Cloud Networks > your VCN > Security Lists"
+  warn "  Add ingress rules for ${PORT}/tcp, 80/tcp, 443/tcp,"
+  warn "  and ${PORT_RANGE_START}-${PORT_RANGE_END} on both tcp and udp."
+fi
+
 # ---------------------------------------------------------------------------
 # Start
 # ---------------------------------------------------------------------------
@@ -213,10 +255,10 @@ $(bold "Almost done — two steps left")
 
 1. Register this node. Run in the Supabase SQL editor:
 
-   insert into nodes (id, name, region, agent_url, public_host,
+   insert into nodes (id, name, region, arch, agent_url, public_host,
                       max_servers, max_memory_mb,
                       port_range_start, port_range_end, status)
-   values ('${NODE_ID}', '${NODE_NAME}', '${REGION}',
+   values ('${NODE_ID}', '${NODE_NAME}', '${REGION}', '${ARCH}',
            '${AGENT_URL}', '${PUBLIC_HOST}',
            ${MAX_SERVERS}, ${MAX_MEMORY_MB},
            ${PORT_RANGE_START}, ${PORT_RANGE_END}, 'offline');
@@ -241,6 +283,7 @@ $(bold "Then")
      cd ${AGENT_DIR} && $COMPOSE logs -f
 
    Node id : ${NODE_ID}
+   Arch    : ${ARCH}
    Data    : ${DATA_DIR}
 
 EOF

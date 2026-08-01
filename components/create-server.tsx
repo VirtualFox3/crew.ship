@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { Alert, Badge, Button, Card, Field, Input, Select, Spinner, Toggle } from "@/components/ui";
 import { api, errorMessage } from "@/lib/client-api";
-import { SOFTWARE } from "@/lib/software";
+import { SOFTWARE, type SoftwareInfo } from "@/lib/software";
 import { slugify } from "@/lib/utils";
 import type { ServerEdition, ServerSoftware } from "@/lib/types";
 import type { VersionOption } from "@/lib/versions";
@@ -73,18 +73,35 @@ export function CreateServer({ domain, suggested }: { domain: string; suggested:
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // What the fleet's hardware can actually run. Bedrock has no ARM build, so
+  // on an ARM-only fleet it comes back flagged rather than silently missing.
+  const [catalogue, setCatalogue] = useState<(SoftwareInfo & { unavailable: string | null })[]>(
+    SOFTWARE.map((s) => ({ ...s, unavailable: null })),
+  );
+
+  useEffect(() => {
+    api<{ software: (SoftwareInfo & { unavailable: string | null })[] }>("/api/software")
+      .then(({ software }) => setCatalogue(software))
+      .catch(() => {
+        // Keep the static list; the create call re-checks server-side anyway.
+      });
+  }, []);
+
   const crossplay = edition === "hybrid";
 
   const available = useMemo(() => {
-    if (edition === "bedrock") return SOFTWARE.filter((s) => s.edition === "bedrock");
-    if (crossplay) return SOFTWARE.filter((s) => s.supports.crossplay && !s.proxy);
-    return SOFTWARE.filter((s) => s.edition === "java");
-  }, [edition, crossplay]);
+    if (edition === "bedrock") return catalogue.filter((s) => s.edition === "bedrock");
+    if (crossplay) return catalogue.filter((s) => s.supports.crossplay && !s.proxy);
+    return catalogue.filter((s) => s.edition === "java");
+  }, [edition, crossplay, catalogue]);
 
   // Keep the software choice legal whenever the edition changes.
   useEffect(() => {
-    if (!available.some((s) => s.id === software)) {
-      setSoftware((available.find((s) => s.recommended) ?? available[0]).id);
+    const runnable = available.filter((s) => !s.unavailable);
+    const pool = runnable.length ? runnable : available;
+    if (!pool.length) return;
+    if (!pool.some((s) => s.id === software)) {
+      setSoftware((pool.find((s) => s.recommended) ?? pool[0]).id);
     }
   }, [available, software]);
 
@@ -192,21 +209,30 @@ export function CreateServer({ domain, suggested }: { domain: string; suggested:
             {available.map((s) => (
               <button
                 key={s.id}
-                onClick={() => setSoftware(s.id)}
+                onClick={() => !s.unavailable && setSoftware(s.id)}
+                disabled={Boolean(s.unavailable)}
+                title={s.unavailable ?? undefined}
                 className={`rounded-2xl border p-4 text-left transition-colors ${
-                  software === s.id
-                    ? "border-grass-500 bg-grass-500/8"
-                    : "border-ink-700 bg-ink-900/60 hover:border-ink-600"
+                  s.unavailable
+                    ? "cursor-not-allowed border-ink-800 bg-ink-900/30 opacity-55"
+                    : software === s.id
+                      ? "border-grass-500 bg-grass-500/8"
+                      : "border-ink-700 bg-ink-900/60 hover:border-ink-600"
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold">{s.name}</span>
                   <div className="flex gap-1.5">
-                    {s.recommended && <Badge tone="grass">Recommended</Badge>}
-                    {software === s.id && <Check className="size-4 text-grass-400" />}
+                    {s.unavailable && <Badge tone="amber">Unavailable</Badge>}
+                    {!s.unavailable && s.recommended && <Badge tone="grass">Recommended</Badge>}
+                    {software === s.id && !s.unavailable && (
+                      <Check className="size-4 text-grass-400" />
+                    )}
                   </div>
                 </div>
-                <p className="mt-1.5 text-xs leading-relaxed text-ink-400">{s.blurb}</p>
+                <p className="mt-1.5 text-xs leading-relaxed text-ink-400">
+                  {s.unavailable ?? s.blurb}
+                </p>
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {s.supports.plugins && <Badge>Plugins</Badge>}
                   {s.supports.mods && <Badge>Mods</Badge>}

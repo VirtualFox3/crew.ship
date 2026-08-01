@@ -38,6 +38,9 @@ export function sendHeartbeat({ runningCount, usedMemoryMb, servers }) {
   return post("/api/internal/nodes", {
     nodeId: config.nodeId,
     status: "online",
+    // Node's own CPU architecture. The panel uses it to hide software the
+    // machine cannot run — Bedrock has no ARM build, for instance.
+    arch: process.arch === "arm64" ? "arm64" : "x64",
     runningCount,
     usedMemoryMb,
     servers,

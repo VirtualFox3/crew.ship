@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { ApiError, handler, ok, readJson, requireUser } from "@/lib/api";
 import { createServerSchema, firstIssue } from "@/lib/validation";
-import { softwareInfo } from "@/lib/software";
-import type { Profile } from "@/lib/types";
+import { runsOn, softwareInfo } from "@/lib/software";
+import { createAdminClient } from "@/lib/supabase/admin";
+import type { NodeArch, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,24 @@ export const POST = handler(async (request: Request) => {
   const crossplay = input.crossplay && info.supports.crossplay;
   if (input.crossplay && !info.supports.crossplay) {
     throw new ApiError(`${info.name} cannot bridge Bedrock players. Try Paper or Fabric.`);
+  }
+
+  // Refuse hardware the fleet cannot run before taking the user's settings.
+  // The wizard greys these out, but a direct API call must not slip past.
+  try {
+    const admin = createAdminClient();
+    const { data: nodes } = await admin.from("nodes").select("arch").eq("status", "online");
+    const arches = [...new Set((nodes ?? []).map((n) => n.arch as NodeArch))];
+    if (arches.length && !arches.some((a) => runsOn(info, a))) {
+      throw new ApiError(
+        `${info.name} needs an ${info.arch?.join(" or ")} node, and none is online. ` +
+          `Try Paper or Fabric with crossplay to reach Bedrock players.`,
+        409,
+      );
+    }
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    // No service-role key yet; placement will surface the problem instead.
   }
 
   const { data: profile } = await supabase

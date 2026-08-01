@@ -26,6 +26,7 @@ function assertAgent(request: Request) {
 interface Heartbeat {
   nodeId: string;
   status?: "online" | "draining" | "offline";
+  arch?: "x64" | "arm64";
   runningCount?: number;
   usedMemoryMb?: number;
   servers?: {
@@ -48,6 +49,7 @@ export const POST = handler(async (request: Request) => {
     .from("nodes")
     .update({
       status: body.status ?? "online",
+      ...(body.arch ? { arch: body.arch } : {}),
       running_count: body.runningCount ?? 0,
       used_memory_mb: body.usedMemoryMb ?? 0,
       last_heartbeat: new Date().toISOString(),

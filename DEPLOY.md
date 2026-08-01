@@ -123,8 +123,33 @@ not — keep them in `wrangler secret`.
 
 ## 3. Bring up a node
 
-Any Linux machine with Docker. A useful starting size is 8 vCPU / 32 GB RAM,
-which comfortably holds ~40 servers given that idle ones sleep.
+Any Linux machine with Docker, x86 or ARM. A useful starting size is 8 vCPU /
+32 GB RAM, which comfortably holds ~40 servers given that idle ones sleep.
+
+### Free option: Oracle Cloud Always Free
+
+Oracle's Always Free tier gives 4 ARM cores, 24 GB RAM and 200 GB of disk
+indefinitely — enough for roughly 12–15 servers. It is the only free tier large
+enough to be useful here; the others cap out around 1 GB of RAM.
+
+Create an **Ampere (VM.Standard.A1.Flex)** instance with Ubuntu 22.04, 4 OCPUs
+and 24 GB. Two things to know going in:
+
+- **ARM cannot run native Bedrock.** Mojang ships the Bedrock Dedicated Server
+  for x86 only. Every Java software works, and Bedrock players still get in
+  through Geyser crossplay, so this costs you nothing in practice. The panel
+  reads each node's architecture from its heartbeat and greys out Bedrock when
+  no x86 node is online, so nobody can create a server that will not start.
+- **Oracle blocks ports in two separate places.** The instance has iptables
+  rules that reject everything but SSH, *and* the VCN has its own security
+  lists. `install.sh` handles the first and persists the change; the second is
+  in the console under Networking → Virtual Cloud Networks → your VCN →
+  Security Lists. Add ingress rules for 8080/tcp, 80/tcp, 443/tcp and
+  25600–25999 on **both** tcp and udp. Missing this is the single most common
+  reason a node looks dead from outside while reporting healthy locally.
+
+ARM capacity is frequently "out of capacity" in busy regions — retry, or pick a
+different home region.
 
 ### Register it in the database
 
