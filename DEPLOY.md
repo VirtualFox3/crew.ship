@@ -228,6 +228,52 @@ panel.
 | 25600–25999 | TCP | Java servers |
 | 25600–25999 | UDP | Bedrock servers and Geyser crossplay |
 
+### No public IP or domain? Use playit.gg
+
+A tunnel removes the three hardest parts of node setup at once: no port
+forwarding, no domain, no TLS certificate. It is what makes hosting from a home
+machine or a NAT'd box possible, and it is free.
+
+1. Sign up at [playit.gg](https://playit.gg) and copy your **secret key** from
+   Account → Settings.
+2. Give it to `install.sh` when prompted, or pass `PLAYIT_SECRET_KEY=...`. The
+   installer starts the tunnel agent alongside the Pack.Host agent.
+3. For each server, add a tunnel at
+   [playit.gg/account/tunnels](https://playit.gg/account/tunnels) pointing at
+   the node-local port (handed out from 25600 upward), then record the mapping:
+
+```sql
+update nodes
+   set tunnel_host  = 'your-name.craft.playit.gg',
+       tunnel_ports = '{"25601": 41234, "25602": 41235}'::jsonb
+ where id = '<node id>';
+```
+
+**The mapping is the part that matters.** playit publishes a *different* port
+than the server binds locally — a server on 25601 might be reachable at
+`your-name.craft.playit.gg:41234`. Without the mapping the panel would show
+25601, which nothing outside the machine can reach. With it, the panel shows
+players the address that actually works.
+
+The agent's control API still needs HTTPS separately — either the Caddy setup
+below, or a Cloudflare Tunnel.
+
+### How the panel picks an address
+
+Four sources, most specific first, so the panel never shows an address that
+does not resolve:
+
+| Order | Source | Shown as |
+|---|---|---|
+| 1 | The server's custom domain | `play.example.com` |
+| 2 | Node tunnel + mapped port | `abc.craft.playit.gg:41234` |
+| 3 | Wildcard DNS, if `NEXT_PUBLIC_SERVER_DOMAIN` is set to a domain you own | `myserver.example.com:25601` |
+| 4 | The node's own host or IP | `203.0.113.5:25601` |
+
+If `NEXT_PUBLIC_SERVER_DOMAIN` is left at the `pack.host` placeholder it is
+skipped entirely — otherwise the panel would advertise a domain you do not
+control.
+
 ### TLS for the agent
 
 The panel calls the agent over HTTPS and the browser opens a `wss://` console

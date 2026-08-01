@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { agentConfigured } from "@/lib/agent";
 import { serverDomain } from "@/lib/env";
 import type { Node, Profile, Server } from "@/lib/types";
+import type { NodeAddressInfo } from "@/components/server-list";
 
 export const metadata: Metadata = { title: "Your servers" };
 export const dynamic = "force-dynamic";
@@ -26,6 +27,27 @@ export default async function DashboardPage() {
   const list = (servers as Server[] | null) ?? [];
   const limit = (profile as Profile | null)?.server_limit ?? 4;
 
+  // Addresses depend on the node: a tunnelled node publishes a different port
+  // than the one the server binds locally. Node rows are service-role only.
+  let nodes: Record<string, NodeAddressInfo> = {};
+  try {
+    const { data } = await createAdminClient()
+      .from("nodes")
+      .select("id, public_host, tunnel_host, tunnel_ports");
+    nodes = Object.fromEntries(
+      (data ?? []).map((n) => [
+        n.id,
+        {
+          public_host: n.public_host,
+          tunnel_host: n.tunnel_host,
+          tunnel_ports: n.tunnel_ports ?? {},
+        },
+      ]),
+    );
+  } catch {
+    // No service-role key configured; addresses fall back to the domain.
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -39,7 +61,7 @@ export default async function DashboardPage() {
 
       <FleetNotice />
 
-      <ServerList initialServers={list} domain={serverDomain()} />
+      <ServerList initialServers={list} domain={serverDomain()} nodes={nodes} />
     </div>
   );
 }

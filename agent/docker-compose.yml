@@ -18,3 +18,21 @@ services:
       - /var/lib/packhost:/var/lib/packhost
     environment:
       DATA_DIR: /var/lib/packhost
+
+  # playit.gg tunnel. Optional: only started with `--profile tunnel`, which
+  # install.sh does when you supply a secret key.
+  #
+  # Gives the node a public address without a public IP, a domain, a
+  # certificate, or a single port forward — which is what makes hosting from a
+  # home machine or a NAT'd box possible at all.
+  #
+  # host networking so it can reach every Minecraft container's published port
+  # directly, without linking each one.
+  playit:
+    image: ghcr.io/playit-cloud/playit-agent:0.15
+    container_name: packhost-playit
+    restart: unless-stopped
+    network_mode: host
+    profiles: ["tunnel"]
+    environment:
+      SECRET_KEY: ${PLAYIT_SECRET_KEY:-}

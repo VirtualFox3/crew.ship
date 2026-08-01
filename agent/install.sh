@@ -100,6 +100,17 @@ ask PUBLIC_HOST "Public hostname or IP players will connect to" "$(hostname -f 2
 
 PANEL_URL="${PANEL_URL%/}"
 
+# playit.gg is optional. It matters most when the node has no public IP — a
+# home machine, or anything behind NAT — because it removes port forwarding,
+# the domain, and the TLS certificate from the setup in one go.
+if [ -z "${PLAYIT_SECRET_KEY:-}" ] && [ -t 0 ]; then
+  echo
+  info "playit.gg gives this node a public address with no port forwarding,"
+  info "no domain and no certificate. Leave blank to skip and use the node's"
+  info "own IP instead."
+  read -r -p "  playit.gg secret key (optional): " PLAYIT_SECRET_KEY
+fi
+
 # The node's identity. Generating it here rather than reading it back from the
 # panel means the operator runs exactly one SQL statement, at the end.
 NODE_ID="${NODE_ID:-$(cat /proc/sys/kernel/random/uuid)}"
@@ -171,6 +182,7 @@ MAX_SERVERS=${MAX_SERVERS}
 MAX_MEMORY_MB=${MAX_MEMORY_MB}
 
 DATA_DIR=${DATA_DIR}
+PLAYIT_SECRET_KEY=${PLAYIT_SECRET_KEY:-}
 EOF
 umask 022
 
@@ -227,7 +239,12 @@ fi
 echo
 bold "Starting the agent"
 cd "$AGENT_DIR"
-$COMPOSE up -d --build
+if [ -n "${PLAYIT_SECRET_KEY:-}" ]; then
+  info "Starting the playit.gg tunnel alongside the agent"
+  $COMPOSE --profile tunnel up -d --build
+else
+  $COMPOSE up -d --build
+fi
 
 echo
 info "Waiting for the agent to answer..."
@@ -276,6 +293,26 @@ $(bold "Almost done — two steps left")
    systemctl reload caddy
 
    Caddy gets the certificate and handles the WebSocket upgrade on its own.
+
+$(if [ -n "${PLAYIT_SECRET_KEY:-}" ]; then cat <<TUNNEL
+
+$(bold "3. Finish the playit.gg tunnel")
+
+   The tunnel agent is running. For each server you create, add a tunnel at
+   https://playit.gg/account/tunnels pointing at this node's local port
+   (they are handed out from ${PORT_RANGE_START} upward), then record the
+   mapping so the panel shows players the right address:
+
+     update nodes
+        set tunnel_host  = 'your-name.craft.playit.gg',
+            tunnel_ports = '{"${PORT_RANGE_START}": 41234}'::jsonb
+      where id = '${NODE_ID}';
+
+   The key is that playit publishes a DIFFERENT port than the server binds
+   locally. Without this mapping the panel would show the local port, which
+   nobody outside the machine can reach.
+TUNNEL
+fi)
 
 $(bold "Then")
 

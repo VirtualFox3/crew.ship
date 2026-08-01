@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isConfigured, serverDomain } from "@/lib/env";
 import { SetupNotice } from "@/components/setup-notice";
 import { softwareInfo } from "@/lib/software";
+import { resolveAddress } from "@/lib/address";
 import type { Node, Server } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -48,16 +49,19 @@ export default async function ServerLayout({
 
   if (!server) notFound();
 
-  // Node name is cosmetic; a failure here must not take the page down.
-  let node: Pick<Node, "name"> | null = null;
+  // The node decides the address, so this is more than cosmetic — but a
+  // failure here still must not take the page down.
+  let node:
+    | Pick<Node, "name" | "public_host" | "tunnel_host" | "tunnel_ports">
+    | null = null;
   if (server.node_id) {
     try {
       const { data } = await createAdminClient()
         .from("nodes")
-        .select("name")
+        .select("name, public_host, tunnel_host, tunnel_ports")
         .eq("id", server.node_id)
         .maybeSingle();
-      node = data;
+      node = data ? { ...data, tunnel_ports: data.tunnel_ports ?? {} } : null;
     } catch {
       node = null;
     }
@@ -70,7 +74,7 @@ export default async function ServerLayout({
       <div className="space-y-6">
         <ServerHeader
           initialServer={server as Server}
-          domain={serverDomain()}
+          address={resolveAddress(server as Server, node, serverDomain())}
           nodeName={node?.name ?? null}
         />
 
