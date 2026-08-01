@@ -38,7 +38,7 @@ export const GET = handler(async (_request: Request, { params }: Params) => {
  */
 export const POST = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "addons" });
 
   const parsed = installAddonSchema.safeParse(await readJson(request));
   if (!parsed.success) throw new ApiError(firstIssue(parsed.error));
@@ -112,7 +112,7 @@ export const POST = handler(async (request: Request, { params }: Params) => {
 
 export const DELETE = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "addons" });
 
   const addonId = new URL(request.url).searchParams.get("addon");
   if (!addonId) throw new ApiError("Missing addon id.");
@@ -144,7 +144,7 @@ export const DELETE = handler(async (request: Request, { params }: Params) => {
 /** Enable/disable without uninstalling — the agent renames to `.jar.disabled`. */
 export const PATCH = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "addons" });
 
   const body = await readJson<{ addon?: string; enabled?: boolean }>(request);
   if (!body.addon || typeof body.enabled !== "boolean") {

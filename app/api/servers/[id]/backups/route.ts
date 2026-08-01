@@ -25,7 +25,7 @@ export const GET = handler(async (_request: Request, { params }: Params) => {
 /** Snapshots the whole server directory on the node. */
 export const POST = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "backups" });
   const node = requireNode(ctx);
 
   const parsed = backupSchema.safeParse(await readJson(request).catch(() => ({})));
@@ -59,7 +59,7 @@ export const POST = handler(async (request: Request, { params }: Params) => {
 /** Restores a snapshot. The server must be offline so the world is not in use. */
 export const PUT = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "backups" });
   const node = requireNode(ctx);
 
   if (ctx.server.status !== "offline") {
@@ -90,7 +90,7 @@ export const PUT = handler(async (request: Request, { params }: Params) => {
 
 export const DELETE = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "backups" });
 
   const backupId = new URL(request.url).searchParams.get("backup");
   if (!backupId) throw new ApiError("Missing backup id.");

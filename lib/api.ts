@@ -3,7 +3,8 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { AgentError } from "@/lib/agent";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { Node, Server } from "@/lib/types";
+import { permissionsFor, type Capability } from "@/lib/permissions";
+import type { AccessRole, Node, Server } from "@/lib/types";
 
 export class ApiError extends Error {
   constructor(
@@ -64,26 +65,21 @@ export interface ServerContext {
   admin: SupabaseClient;
   server: Server;
   node: Node | null;
+  /** Everything the caller may do here. Owners hold all of it. */
+  permissions: Capability[];
 }
 
 /**
- * Loads a server the caller may touch.
+ * Loads a server the caller may touch, and works out what they may do with it.
  *
  * RLS already restricts reads to owned and shared servers, so a miss here is
- * genuinely a 404 for this user. Two further levels sit on top:
- *
- * - `manage`     day-to-day operation: console, players, add-ons, files,
- *                backups, power. Admins and moderators.
- * - `administer` changes the shape of the server: settings, software, version,
- *                worlds. Owner and admins only.
- *
- * The split exists because the invite UI promises moderators cannot change
- * settings, and a permission that is described but not enforced is worse than
- * one that was never offered.
+ * genuinely a 404 for this user. `require` then names the single capability
+ * this route needs — "files", "settings", and so on — which keeps the
+ * permission next to the operation instead of in a tier lookup somewhere else.
  */
 export async function serverContext(
   serverId: string,
-  { manage = false, administer = false } = {},
+  { require: required }: { require?: Capability } = {},
 ): Promise<ServerContext> {
   const { user, supabase } = await requireUser();
 
@@ -95,24 +91,30 @@ export async function serverContext(
 
   if (!server) throw new ApiError("Server not found.", 404);
 
-  if ((manage || administer) && server.owner_id !== user.id) {
+  let permissions: Capability[];
+
+  if (server.owner_id === user.id) {
+    permissions = permissionsFor("owner");
+  } else {
     const { data: access } = await supabase
       .from("server_access")
-      .select("role")
+      .select("role, permissions")
       .eq("server_id", serverId)
       .eq("user_id", user.id)
       .maybeSingle();
 
-    const allowed = administer ? ["admin"] : ["admin", "moderator"];
+    permissions = access
+      ? permissionsFor(access.role as AccessRole, access.permissions)
+      : [];
+  }
 
-    if (!access || !allowed.includes(access.role)) {
-      throw new ApiError(
-        access?.role === "moderator"
-          ? "Moderators cannot change server settings. Ask an admin."
-          : "You have view-only access to this server.",
-        403,
-      );
-    }
+  if (required && !permissions.includes(required)) {
+    const label =
+      CAPABILITY_LABELS[required] ?? required;
+    throw new ApiError(
+      `You do not have permission to ${label} on this server. Ask the owner.`,
+      403,
+    );
   }
 
   const admin = createAdminClient();
@@ -122,8 +124,21 @@ export async function serverContext(
     node = (data as Node | null) ?? null;
   }
 
-  return { user, supabase, admin, server: server as Server, node };
+  return { user, supabase, admin, server: server as Server, node, permissions };
 }
+
+/** Phrased to complete "You do not have permission to ...". */
+const CAPABILITY_LABELS: Record<Capability, string> = {
+  console: "view the console",
+  command: "run commands",
+  power: "start or stop the server",
+  players: "manage players",
+  addons: "manage plugins and mods",
+  files: "manage files",
+  backups: "manage backups",
+  worlds: "manage worlds",
+  settings: "change settings",
+};
 
 /** A node is required for anything that touches the running container. */
 export function requireNode(ctx: ServerContext): Node {

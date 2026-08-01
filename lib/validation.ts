@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SOFTWARE } from "@/lib/software";
+import { CAPABILITIES } from "@/lib/permissions";
 
 const softwareIds = SOFTWARE.map((s) => s.id) as [string, ...string[]];
 
@@ -101,6 +102,18 @@ export const playerSchema = z.object({
 export const accessSchema = z.object({
   username: z.string().trim().min(3).max(24),
   role: z.enum(["admin", "moderator", "viewer"]),
+  /** Omit to use the role's preset; send a list to grant exactly those. */
+  permissions: z
+    .array(z.enum(CAPABILITIES))
+    .max(CAPABILITIES.length)
+    .optional(),
+});
+
+/** Changing what an existing member may do, without re-inviting them. */
+export const accessUpdateSchema = z.object({
+  userId: z.string().uuid(),
+  role: z.enum(["admin", "moderator", "viewer"]).optional(),
+  permissions: z.array(z.enum(CAPABILITIES)).max(CAPABILITIES.length).optional(),
 });
 
 export const fileWriteSchema = z.object({
