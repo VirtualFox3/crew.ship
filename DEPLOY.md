@@ -90,13 +90,9 @@ bundle, so those have to exist *at build time* — `wrangler secret put` runs to
 late and the login form ends up pointed at an empty URL. The two real secrets
 are read on the server at request time and must **not** be baked into a bundle.
 
-Build-time — create `.env.production` (gitignored):
-
-```
-NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
-NEXT_PUBLIC_SERVER_DOMAIN=pack.host
-```
+Build-time — already handled. `.env.production` is committed with the three
+public values, so `npm run cf:build` picks them up with no extra step. Edit
+that file to point at a different Supabase project.
 
 Runtime — store as encrypted secrets:
 
