@@ -12,4 +12,3 @@ agent/data/
 .open-next/
 .wrangler/
 .dev.vars
-.env.production
