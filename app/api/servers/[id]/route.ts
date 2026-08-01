@@ -34,7 +34,7 @@ export const GET = handler(async (_request: Request, { params }: Params) => {
 
 export const PATCH = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { administer: true });
+  const ctx = await serverContext(id, { require: "settings" });
 
   const parsed = updateServerSchema.safeParse(await readJson(request));
   if (!parsed.success) throw new ApiError(firstIssue(parsed.error));

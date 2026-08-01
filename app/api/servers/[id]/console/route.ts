@@ -14,7 +14,7 @@ type Params = { params: Promise<{ id: string }> };
  */
 export const POST = handler(async (_request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id);
+  const ctx = await serverContext(id, { require: "console" });
   const node = requireNode(ctx);
 
   const token = issueConsoleToken(id);
@@ -22,6 +22,6 @@ export const POST = handler(async (_request: Request, { params }: Params) => {
   return ok({
     url: consoleUrl(node, id, token),
     expiresIn: 900,
-    canSendCommands: ctx.server.owner_id === ctx.user.id,
+    canSendCommands: ctx.permissions.includes("command"),
   });
 });

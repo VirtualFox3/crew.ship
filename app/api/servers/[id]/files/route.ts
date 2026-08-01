@@ -45,7 +45,7 @@ export const GET = handler(async (request: Request, { params }: Params) => {
 
 export const PUT = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "files" });
   const node = requireNode(ctx);
 
   const parsed = fileWriteSchema.safeParse(await readJson(request));
@@ -64,7 +64,7 @@ export const PUT = handler(async (request: Request, { params }: Params) => {
 
 export const DELETE = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "files" });
   const node = requireNode(ctx);
 
   const path = safePath(new URL(request.url).searchParams.get("path"));
@@ -78,7 +78,7 @@ export const DELETE = handler(async (request: Request, { params }: Params) => {
 /** Creates a directory or an empty file. */
 export const POST = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "files" });
   const node = requireNode(ctx);
 
   const body = await readJson<{ path?: string; directory?: boolean }>(request);

@@ -25,7 +25,7 @@ export default async function AccessPage({
   const [{ data: members }, { data: owner }] = await Promise.all([
     supabase
       .from("server_access")
-      .select("user_id, role, created_at, profiles:user_id (username, display_name, avatar_url)")
+      .select("user_id, role, permissions, created_at, profiles:user_id (username, display_name, avatar_url)")
       .eq("server_id", id),
     supabase.from("profiles").select("username").eq("id", s.owner_id).maybeSingle(),
   ]);

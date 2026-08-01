@@ -9,7 +9,7 @@ type Params = { params: Promise<{ id: string }> };
 /** Sends a console command over RCON via the node. */
 export const POST = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "command" });
 
   const parsed = commandSchema.safeParse(await readJson(request));
   if (!parsed.success) throw new ApiError(firstIssue(parsed.error));

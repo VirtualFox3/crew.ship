@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, Trash2, UserPlus } from "lucide-react";
+import { Crown, Pencil, Trash2, UserPlus, X } from "lucide-react";
 import {
   Alert,
   Badge,
@@ -11,24 +11,24 @@ import {
   EmptyState,
   Field,
   Input,
-  Select,
 } from "@/components/ui";
+import { PermissionPicker } from "@/components/permission-picker";
 import { api, errorMessage } from "@/lib/client-api";
+import {
+  ROLE_PRESETS,
+  describePermissions,
+  permissionsFor,
+  type Capability,
+} from "@/lib/permissions";
 import type { AccessRole } from "@/lib/types";
 
 interface Member {
   user_id: string;
   role: AccessRole;
+  permissions: string[] | null;
   created_at: string;
   profiles: { username: string; display_name: string | null; avatar_url: string | null } | null;
 }
-
-const ROLE_BLURB: Record<string, string> = {
-  admin: "Everything except deleting the server or inviting people.",
-  moderator:
-    "Start/stop, console, players, plugins, files and backups. Cannot change settings, software, version or worlds.",
-  viewer: "Read-only: status, console output and player list.",
-};
 
 export function AccessManager({
   serverId,
@@ -43,9 +43,16 @@ export function AccessManager({
 }) {
   const [members, setMembers] = useState(initialMembers);
   const [username, setUsername] = useState("");
-  const [role, setRole] = useState<AccessRole>("moderator");
+  const [granted, setGranted] = useState<Capability[]>([...ROLE_PRESETS.moderator]);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Capability[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function reload() {
+    const { members } = await api<{ members: Member[] }>(`/api/servers/${serverId}/access`);
+    setMembers(members);
+  }
 
   async function invite(event: React.FormEvent) {
     event.preventDefault();
@@ -54,14 +61,29 @@ export function AccessManager({
     try {
       await api(`/api/servers/${serverId}/access`, {
         method: "POST",
-        json: { username: username.trim(), role },
+        // The role is only a label once permissions are explicit; store the
+        // closest preset so the badge reads sensibly.
+        json: { username: username.trim(), role: roleFor(granted), permissions: granted },
       });
-      // The API returns only a confirmation; re-read to get the joined profile.
-      const { members } = await api<{ members: Member[] }>(
-        `/api/servers/${serverId}/access`,
-      );
-      setMembers(members);
+      await reload();
       setUsername("");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function save(member: Member) {
+    setBusy(member.user_id);
+    setError(null);
+    try {
+      await api(`/api/servers/${serverId}/access`, {
+        method: "PATCH",
+        json: { userId: member.user_id, role: roleFor(draft), permissions: draft },
+      });
+      await reload();
+      setEditing(null);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -90,7 +112,7 @@ export function AccessManager({
       <Card>
         <CardHeader
           title="Who can manage this server"
-          description="Invite friends by their Pack.Host username. Free, like everything else."
+          description="Tick exactly what each person may do. Presets are a starting point, not a limit."
         />
 
         <div className="flex items-center gap-3 border-b border-ink-800 px-4 py-3">
@@ -104,34 +126,77 @@ export function AccessManager({
 
         {members.length ? (
           <ul className="divide-y divide-ink-800">
-            {members.map((member) => (
-              <li key={member.user_id} className="flex items-center gap-3 px-4 py-3">
-                <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-ink-800 text-xs font-semibold text-ink-300">
-                  {(member.profiles?.username ?? "?").slice(0, 2).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {member.profiles?.username ?? "unknown"}
-                  </p>
-                  <p className="text-xs text-ink-500">{ROLE_BLURB[member.role]}</p>
-                </div>
-                <Badge tone={member.role === "admin" ? "grass" : "neutral"}>
-                  {member.role}
-                </Badge>
-                {isOwner && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    loading={busy === member.user_id}
-                    onClick={() => revoke(member)}
-                    className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                    title="Remove access"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                )}
-              </li>
-            ))}
+            {members.map((member) => {
+              const effective = permissionsFor(member.role, member.permissions);
+              const open = editing === member.user_id;
+
+              return (
+                <li key={member.user_id} className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-ink-800 text-xs font-semibold text-ink-300">
+                      {(member.profiles?.username ?? "?").slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {member.profiles?.username ?? "unknown"}
+                      </p>
+                      <p className="truncate text-xs text-ink-500">
+                        {effective.length
+                          ? effective.join(" · ")
+                          : "No permissions — they can open the server but do nothing"}
+                      </p>
+                    </div>
+                    <Badge tone={effective.length ? "grass" : "neutral"}>
+                      {describePermissions(effective)}
+                    </Badge>
+
+                    {isOwner && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setEditing(open ? null : member.user_id);
+                            setDraft(effective);
+                          }}
+                          title={open ? "Cancel" : "Change permissions"}
+                        >
+                          {open ? <X className="size-3.5" /> : <Pencil className="size-3.5" />}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          loading={busy === member.user_id && !open}
+                          onClick={() => revoke(member)}
+                          className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                          title="Remove access"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
+
+                  {open && (
+                    <div className="mt-3 rounded-xl border border-ink-700 bg-ink-900/60 p-3">
+                      <PermissionPicker value={draft} onChange={setDraft} />
+                      <div className="mt-3 flex justify-end gap-2">
+                        <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          loading={busy === member.user_id}
+                          onClick={() => save(member)}
+                        >
+                          Save permissions
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <div className="p-4">
@@ -146,9 +211,16 @@ export function AccessManager({
 
       {isOwner && (
         <Card>
-          <CardHeader title="Invite someone" />
-          <form onSubmit={invite} className="flex flex-wrap items-end gap-3 p-5">
-            <Field label="Pack.Host username" className="min-w-48 flex-1">
+          <CardHeader
+            title="Invite someone"
+            description="They need a free Pack.Host account first. Playing needs no account — only the server address."
+          />
+          <form onSubmit={invite} className="space-y-4 p-5">
+            <Field
+              label="Pack.Host username"
+              hint="Not their email or Minecraft name — the username they signed up with."
+              className="max-w-sm"
+            >
               <Input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -156,20 +228,32 @@ export function AccessManager({
                 maxLength={24}
               />
             </Field>
-            <Field label="Role" className="w-44">
-              <Select value={role} onChange={(e) => setRole(e.target.value as AccessRole)}>
-                <option value="admin">Admin</option>
-                <option value="moderator">Moderator</option>
-                <option value="viewer">Viewer</option>
-              </Select>
-            </Field>
-            <Button type="submit" loading={busy === "invite"} disabled={!username.trim()}>
-              <UserPlus className="size-4" />
-              Invite
-            </Button>
+
+            <div>
+              <p className="mb-2 text-xs font-medium text-ink-300">What they can do</p>
+              <PermissionPicker value={granted} onChange={setGranted} />
+            </div>
+
+            <div className="flex justify-end">
+              <Button type="submit" loading={busy === "invite"} disabled={!username.trim()}>
+                <UserPlus className="size-4" />
+                Invite
+              </Button>
+            </div>
           </form>
         </Card>
       )}
     </div>
   );
+}
+
+/** Closest matching preset, used only as a display label. */
+function roleFor(granted: Capability[]): AccessRole {
+  const key = [...granted].sort().join(",");
+  for (const [role, preset] of Object.entries(ROLE_PRESETS)) {
+    if ([...preset].sort().join(",") === key) return role as AccessRole;
+  }
+  // Custom sets are labelled by their most powerful capability.
+  if (granted.includes("settings") || granted.includes("worlds")) return "admin";
+  return granted.length > 1 ? "moderator" : "viewer";
 }

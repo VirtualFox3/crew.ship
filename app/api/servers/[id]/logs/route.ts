@@ -8,7 +8,7 @@ type Params = { params: Promise<{ id: string }> };
 /** Recent console output. Used to backfill the console before the socket opens. */
 export const GET = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id);
+  const ctx = await serverContext(id, { require: "console" });
 
   const lines = Number(new URL(request.url).searchParams.get("lines") ?? 200);
 

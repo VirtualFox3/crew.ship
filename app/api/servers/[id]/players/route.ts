@@ -58,7 +58,7 @@ export const GET = handler(async (_request: Request, { params }: Params) => {
 
 export const POST = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "players" });
 
   const parsed = playerSchema.safeParse(await readJson(request));
   if (!parsed.success) throw new ApiError(firstIssue(parsed.error));
@@ -95,7 +95,7 @@ export const POST = handler(async (request: Request, { params }: Params) => {
 
 export const DELETE = handler(async (request: Request, { params }: Params) => {
   const { id } = await params;
-  const ctx = await serverContext(id, { manage: true });
+  const ctx = await serverContext(id, { require: "players" });
 
   const playerId = new URL(request.url).searchParams.get("player");
   if (!playerId) throw new ApiError("Missing player id.");
