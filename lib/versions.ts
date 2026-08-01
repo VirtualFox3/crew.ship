@@ -163,9 +163,6 @@ export async function versionsFor(software: ServerSoftware): Promise<VersionOpti
       return neoforgeVersions();
     case "bedrock":
       return bedrockVersions();
-    case "pocketmine":
-    case "nukkit":
-      return [{ id: "latest", label: "Latest build", unstable: false }];
     default:
       return mojangVersions();
   }

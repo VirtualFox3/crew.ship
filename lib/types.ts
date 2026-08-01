@@ -23,9 +23,10 @@ export type ServerSoftware =
   | "velocity"
   | "bungeecord"
   | "waterfall"
-  | "bedrock"
-  | "pocketmine"
-  | "nukkit";
+  | "bedrock";
+
+/** CPU architecture of a node. Not every server software runs on both. */
+export type NodeArch = "x64" | "arm64";
 
 export type AddonKind = "plugin" | "mod" | "datapack" | "modpack" | "resourcepack";
 export type AddonSource = "modrinth" | "hangar" | "spigot" | "curseforge" | "url" | "upload";
@@ -47,6 +48,7 @@ export interface Node {
   id: string;
   name: string;
   region: string;
+  arch: NodeArch;
   agent_url: string;
   public_host: string;
   status: "online" | "draining" | "offline";

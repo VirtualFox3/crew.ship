@@ -38,9 +38,10 @@ console straight from the node over a WebSocket.
 ## Features
 
 **Servers**
-- 16 server softwares: Paper, Purpur, Pufferfish, Folia, Spigot, Vanilla,
-  Fabric, Forge, NeoForge, Quilt, Bedrock, PocketMine, Nukkit, Velocity,
-  BungeeCord, Waterfall
+- 14 server softwares: Paper, Purpur, Pufferfish, Folia, Spigot, Vanilla,
+  Fabric, Forge, NeoForge, Quilt, Bedrock, Velocity, BungeeCord, Waterfall
+- Runs on x86 or ARM nodes; the panel hides software the fleet's hardware
+  cannot run rather than letting a server fail at start
 - Every Minecraft version, pulled live from Mojang, PaperMC, Purpur, Fabric,
   Quilt, Forge and NeoForge — including snapshots and pre-releases
 - Switch software or version at any time without losing the world

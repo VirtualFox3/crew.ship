@@ -1,4 +1,4 @@
-import type { ServerEdition, ServerSoftware } from "./types";
+import type { NodeArch, ServerEdition, ServerSoftware } from "./types";
 
 export interface SoftwareInfo {
   id: ServerSoftware;
@@ -18,6 +18,15 @@ export interface SoftwareInfo {
   agentType: string;
   /** Directory add-ons are dropped into. */
   addonDir: string;
+  /**
+   * Architectures this software can run on. Omitted means both.
+   *
+   * Mojang ships the Bedrock Dedicated Server for x86 only, so an ARM node —
+   * which is what most free tiers hand out — cannot run it at all. Recording
+   * that here lets the panel refuse the combination up front instead of
+   * letting someone create a server that can never start.
+   */
+  arch?: NodeArch[];
   recommended?: boolean;
   proxy?: boolean;
 }
@@ -123,25 +132,8 @@ export const SOFTWARE: SoftwareInfo[] = [
     supports: { plugins: false, mods: false, datapacks: false, crossplay: false },
     agentType: "BEDROCK",
     addonDir: "behavior_packs",
+    arch: ["x64"],
     recommended: true,
-  },
-  {
-    id: "pocketmine",
-    name: "PocketMine-MP",
-    edition: "bedrock",
-    blurb: "Bedrock server with a full plugin API. Hundreds of Poggit plugins.",
-    supports: { plugins: true, mods: false, datapacks: false, crossplay: false },
-    agentType: "POCKETMINE",
-    addonDir: "plugins",
-  },
-  {
-    id: "nukkit",
-    name: "Nukkit",
-    edition: "bedrock",
-    blurb: "Java-written Bedrock server. Lightweight with Bukkit-style plugins.",
-    supports: { plugins: true, mods: false, datapacks: false, crossplay: false },
-    agentType: "NUKKIT",
-    addonDir: "plugins",
   },
   {
     id: "velocity",
@@ -184,6 +176,18 @@ export function softwareInfo(id: ServerSoftware): SoftwareInfo {
 }
 
 /** Loader identifier used by Modrinth / Hangar when filtering add-ons. */
+/** Can this software run on a node with the given CPU architecture? */
+export function runsOn(software: SoftwareInfo, arch: NodeArch): boolean {
+  return !software.arch || software.arch.includes(arch);
+}
+
+/** Software the fleet can actually run, given the architectures available. */
+export function availableSoftware(arches: NodeArch[]): SoftwareInfo[] {
+  // With no node registered yet, show everything rather than an empty picker.
+  if (!arches.length) return SOFTWARE;
+  return SOFTWARE.filter((s) => arches.some((a) => runsOn(s, a)));
+}
+
 export function loaderFor(software: ServerSoftware): string {
   switch (software) {
     case "paper":
