@@ -23,7 +23,7 @@ async function getJson<T>(url: string, revalidate = HOUR): Promise<T | null> {
   try {
     const res = await fetch(url, {
       next: { revalidate },
-      headers: { "user-agent": "Pack.Host/1.0 (+https://pack.host)" },
+      headers: { "user-agent": "Howl.Host/1.0 (+https://howl.host)" },
     });
     if (!res.ok) return null;
     return (await res.json()) as T;

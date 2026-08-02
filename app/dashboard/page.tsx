@@ -67,7 +67,7 @@ export default async function DashboardPage() {
 }
 
 /**
- * Servers need a node with the Pack.Host agent on it. Surfacing that up front
+ * Servers need a node with the Howl.Host agent on it. Surfacing that up front
  * beats letting someone create a server that can never start.
  */
 async function FleetNotice() {

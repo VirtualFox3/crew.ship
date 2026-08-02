@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Pack.Host node installer.
+# Howl.Host node installer.
 #
 # Turns a fresh Linux box into a node that hosts Minecraft servers for the
 # panel. Installs Docker if needed, writes the agent config, registers the
@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-DATA_DIR="${DATA_DIR:-/var/lib/packhost}"
+DATA_DIR="${DATA_DIR:-/var/lib/howlhost}"
 PORT="${PORT:-8080}"
 PORT_RANGE_START="${PORT_RANGE_START:-25600}"
 PORT_RANGE_END="${PORT_RANGE_END:-25999}"
@@ -33,7 +33,7 @@ info() { printf '  %s\n' "$*"; }
 warn() { printf '\033[33m  !  %s\033[0m\n' "$*"; }
 die()  { printf '\033[31m  x  %s\033[0m\n' "$*" >&2; exit 1; }
 
-bold "Pack.Host node installer"
+bold "Howl.Host node installer"
 echo
 
 # ---------------------------------------------------------------------------
@@ -149,14 +149,14 @@ if [ -f "$(dirname "$0")/docker-compose.yml" ]; then
   AGENT_DIR="$(cd "$(dirname "$0")" && pwd)"
   info "Using the agent source at ${AGENT_DIR}"
 else
-  AGENT_DIR=/opt/packhost/agent
+  AGENT_DIR=/opt/howlhost/agent
   bold "Fetching the agent source"
   command -v git >/dev/null 2>&1 || die "git is required when piping this script from the web."
-  if [ -d /opt/packhost/.git ]; then
-    git -C /opt/packhost pull --ff-only
+  if [ -d /opt/howlhost/.git ]; then
+    git -C /opt/howlhost pull --ff-only
   else
-    rm -rf /opt/packhost
-    git clone --depth 1 https://github.com/VirtualFox3/Pack.Host.git /opt/packhost
+    rm -rf /opt/howlhost
+    git clone --depth 1 https://github.com/VirtualFox3/Pack.Host.git /opt/howlhost
   fi
 fi
 

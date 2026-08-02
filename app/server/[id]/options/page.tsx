@@ -28,7 +28,7 @@ export default async function OptionsPage({
       <div>
         <h2 className="text-lg font-semibold">Options</h2>
         <p className="mt-1 text-sm text-ink-400">
-          Everything in server.properties, plus the knobs Pack.Host adds on top.
+          Everything in server.properties, plus the knobs Howl.Host adds on top.
         </p>
       </div>
       <OptionsForm

@@ -112,7 +112,7 @@ export function ServerList({
   return (
     <div className="space-y-3">
       {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-200">
+        <div className="border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-200">
           {error}
         </div>
       )}
@@ -244,7 +244,7 @@ export function Address({
         <button
           key={row.key}
           onClick={() => copy(row.value, row.key)}
-          className="group flex items-center gap-2 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600"
+  className="group flex items-center gap-2 border border-ink-700 bg-ink-850 px-2.5 py-1 font-mono text-xs text-ink-200 transition-colors hover:border-ink-600"
           title={ADDRESS_HINT[address.via] ?? `Copy ${row.label} address`}
         >
           <Badge tone={row.tone} className="px-1.5 py-0">

@@ -1,4 +1,4 @@
-# Pack.Host node agent
+# Howl.Host node agent
 
 The daemon that actually hosts the Minecraft servers. One per machine.
 

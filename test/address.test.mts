@@ -14,7 +14,7 @@ test("playit tunnel: uses the RELAY port, never the local one", () => {
   const a = resolveAddress(
     srv(),
     node({ tunnel_host: "abc.craft.playit.gg", tunnel_ports: { "25601": 41234 } }),
-    "pack.host",
+    "howl.host",
   );
   assert.equal(a.java, "abc.craft.playit.gg:41234");
   assert.equal(a.via, "tunnel");
@@ -24,14 +24,14 @@ test("tunnel without a mapping for this port falls through, not a broken address
   const a = resolveAddress(
     srv(),
     node({ tunnel_host: "abc.craft.playit.gg", tunnel_ports: { "25999": 41234 } }),
-    "pack.host",
+    "howl.host",
   );
   assert.equal(a.java, "203.0.113.5:25601");
   assert.equal(a.via, "node-host");
 });
 
 test("the placeholder domain is never shown -- it would not resolve", () => {
-  const a = resolveAddress(srv(), node(), "pack.host");
+  const a = resolveAddress(srv(), node(), "howl.host");
   assert.equal(a.java, "203.0.113.5:25601");
   assert.equal(a.via, "node-host");
 });
@@ -56,7 +56,7 @@ test("crossplay exposes both java and bedrock through the tunnel", () => {
   const a = resolveAddress(
     srv({ edition: "hybrid", bedrock_port: 25602 }),
     node({ tunnel_host: "abc.craft.playit.gg", tunnel_ports: { "25601": 41234, "25602": 41235 } }),
-    "pack.host",
+    "howl.host",
   );
   assert.equal(a.java, "abc.craft.playit.gg:41234");
   assert.equal(a.bedrock, "abc.craft.playit.gg:41235");
@@ -68,7 +68,7 @@ test("a java-only server never advertises a bedrock address", () => {
 });
 
 test("no node yet means no address, rather than a fake one", () => {
-  const a = resolveAddress(srv({ java_port: null }), null, "pack.host");
+  const a = resolveAddress(srv({ java_port: null }), null, "howl.host");
   assert.equal(a.java, null);
   assert.equal(a.via, "unassigned");
 });

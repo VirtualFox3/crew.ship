@@ -41,7 +41,7 @@ export function PermissionPicker({
             type="button"
             disabled={disabled}
             onClick={() => onChange([...ROLE_PRESETS[role]])}
-            className="rounded-lg border border-ink-600 px-2.5 py-1 text-xs capitalize text-ink-300 transition-colors hover:border-ink-500 hover:text-ink-100 disabled:opacity-50"
+  className="border border-ink-600 px-2.5 py-1 text-xs capitalize text-ink-300 transition-colors hover:border-ink-500 hover:text-ink-100 disabled:opacity-50"
           >
             {role}
           </button>
@@ -50,7 +50,7 @@ export function PermissionPicker({
           type="button"
           disabled={disabled}
           onClick={() => onChange([])}
-          className="rounded-lg border border-ink-600 px-2.5 py-1 text-xs text-ink-300 transition-colors hover:border-ink-500 hover:text-ink-100 disabled:opacity-50"
+  className="border border-ink-600 px-2.5 py-1 text-xs text-ink-300 transition-colors hover:border-ink-500 hover:text-ink-100 disabled:opacity-50"
         >
           None
         </button>
@@ -68,15 +68,15 @@ export function PermissionPicker({
               type="button"
               disabled={disabled}
               onClick={() => toggle(cap.id)}
-              className={cn(
-                "flex items-start gap-2.5 rounded-xl border p-3 text-left transition-colors disabled:opacity-50",
+  className={cn(
+                "flex items-start gap-2.5  border p-3 text-left transition-colors disabled:opacity-50",
                 on
                   ? "border-grass-500/50 bg-grass-500/8"
                   : "border-ink-700 bg-ink-850/40 hover:border-ink-600",
               )}
             >
               <span
-                className={cn(
+  className={cn(
                   "mt-0.5 grid size-4 shrink-0 place-items-center rounded border",
                   on ? "border-grass-500 bg-grass-500 text-ink-950" : "border-ink-600",
                 )}
@@ -88,7 +88,7 @@ export function PermissionPicker({
                   {cap.label}
                   {cap.sensitive && on && (
                     <TriangleAlert
-                      className="size-3 text-amber-400"
+  className="size-3 text-amber-400"
                       aria-label="Sensitive permission"
                     />
                   )}

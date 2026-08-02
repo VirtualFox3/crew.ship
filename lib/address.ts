@@ -18,9 +18,9 @@ export interface ResolvedAddress {
 
 /**
  * The default in .env.example. If it is still set, the operator has not
- * configured DNS, so `<name>.pack.host` would be a dead address.
+ * configured DNS, so `<name>.howl.host` would be a dead address.
  */
-const PLACEHOLDER_DOMAIN = "pack.host";
+const PLACEHOLDER_DOMAIN = "howl.host";
 
 function join(host: string, port: number | null, hideDefault = false): string {
   if (!port || (hideDefault && port === 25565)) return host;

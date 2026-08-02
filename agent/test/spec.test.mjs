@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 process.env.NODE_ID ??= "test-node";
 process.env.AGENT_SHARED_SECRET ??= "test-secret";
-process.env.DATA_DIR ??= "/tmp/packhost-test";
+process.env.DATA_DIR ??= "/tmp/howlhost-test";
 
 const { javaEnv, bedrockEnv, portConfig, stripDockerFraming } = await import("../src/docker.js");
 const { parsePlayerList } = await import("../src/rcon.js");

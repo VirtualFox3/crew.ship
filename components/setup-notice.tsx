@@ -8,12 +8,12 @@ export function SetupNotice() {
   return (
     <div className="mx-auto max-w-2xl px-5 py-24">
       <Card className="p-6">
-        <h1 className="text-lg font-semibold">Pack.Host is not connected yet</h1>
+        <h1 className="text-lg font-semibold">Howl.Host is not connected yet</h1>
         <p className="mt-2 text-sm text-ink-400">
           The panel is deployed but has no database. Add these environment variables
           and redeploy:
         </p>
-        <pre className="mt-4 overflow-x-auto rounded-xl border border-ink-700 bg-ink-950 p-4 text-xs text-ink-300">
+        <pre className="mt-4 overflow-x-auto border border-ink-700 bg-ink-950 p-4 text-xs text-ink-300">
 {`NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
 SUPABASE_SERVICE_ROLE_KEY=<service role key>

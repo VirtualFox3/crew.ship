@@ -104,7 +104,7 @@ export function BackupManager({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Before the nether trip (optional name)"
-            className="min-w-48 flex-1"
+  className="min-w-48 flex-1"
             maxLength={64}
           />
           <Button loading={busy === "create"} onClick={create}>
@@ -144,7 +144,7 @@ export function BackupManager({
                   variant="ghost"
                   loading={busy === backup.id}
                   onClick={() => remove(backup)}
-                  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
                   title="Delete backup"
                 >
                   <Trash2 className="size-3.5" />

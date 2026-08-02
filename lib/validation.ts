@@ -8,7 +8,7 @@ const softwareIds = SOFTWARE.map((s) => s.id) as [string, ...string[]];
 const RESERVED_SUBDOMAINS = new Set([
   "www", "api", "app", "panel", "admin", "node", "nodes", "agent", "status",
   "mail", "smtp", "ftp", "cdn", "static", "docs", "blog", "support", "help",
-  "pack", "host", "packhost", "mc", "play", "test", "staging", "dev",
+  "pack", "host", "howl", "howlhost", "mc", "play", "test", "staging", "dev",
 ]);
 
 export const subdomainSchema = z
@@ -30,7 +30,7 @@ export const createServerSchema = z.object({
   memory_mb: z.number().int().min(1024).max(16384).default(4096),
   max_players: z.number().int().min(1).max(1000).default(100),
   crossplay: z.boolean().default(false),
-  motd: z.string().max(120).default("A Pack.Host server"),
+  motd: z.string().max(120).default("A Howl.Host server"),
   gamemode: z.enum(["survival", "creative", "adventure", "spectator"]).default("survival"),
   difficulty: z.enum(["peaceful", "easy", "normal", "hard"]).default("normal"),
   seed: z.string().max(64).optional().nullable(),

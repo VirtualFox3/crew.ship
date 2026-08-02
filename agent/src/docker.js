@@ -15,13 +15,13 @@ import { config } from "./config.js";
 
 export const docker = new Docker({ socketPath: "/var/run/docker.sock" });
 
-export const containerName = (id) => `packhost-${id}`;
+export const containerName = (id) => `howlhost-${id}`;
 export const serverDir = (id) => path.join(config.dataDir, "servers", id);
 export const backupDir = (id) => path.join(config.dataDir, "backups", id);
 
 /** Per-server RCON password, generated once and kept on disk with the world. */
 async function rconPassword(id) {
-  const file = path.join(serverDir(id), ".packhost-rcon");
+  const file = path.join(serverDir(id), ".howlhost-rcon");
   try {
     return (await fs.readFile(file, "utf8")).trim();
   } catch {
@@ -109,7 +109,7 @@ export function bedrockEnv(spec) {
   return {
     EULA: "TRUE",
     VERSION: spec.version,
-    SERVER_NAME: spec.properties.motd ?? "Pack.Host",
+    SERVER_NAME: spec.properties.motd ?? "Howl.Host",
     GAMEMODE: spec.properties.gamemode ?? "survival",
     DIFFICULTY: spec.properties.difficulty ?? "normal",
     MAX_PLAYERS: String(spec.properties["max-players"] ?? 20),
@@ -188,8 +188,8 @@ export async function ensureContainer(spec) {
     Tty: true,
     OpenStdin: true,
     Labels: {
-      "host.pack.server": spec.id,
-      "host.pack.node": config.nodeId,
+      "host.howl.server": spec.id,
+      "host.howl.node": config.nodeId,
     },
     HostConfig: {
       Binds: [`${dir}:${bedrock ? "/data" : "/data"}`],

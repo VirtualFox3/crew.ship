@@ -163,7 +163,7 @@ export function Console({
           <span className="flex items-center gap-2">
             Console
             <span
-              className={cn(
+  className={cn(
                 "size-1.5 rounded-full",
                 connected ? "bg-grass-400" : "bg-ink-500",
               )}
@@ -210,7 +210,7 @@ export function Console({
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
           if (atBottom !== follow) setFollow(atBottom);
         }}
-        className="h-[420px] overflow-y-auto bg-ink-950/80 px-4 py-3 font-mono text-[12px] leading-[1.55]"
+  className="h-[420px] overflow-y-auto bg-ink-950/80 px-4 py-3 font-mono text-[12px] leading-[1.55]"
       >
         {lines.length === 0 ? (
           <p className="py-16 text-center text-ink-600">
@@ -233,7 +233,7 @@ export function Console({
             status === "online" ? "say hello    (↑ for history)" : "Server must be online"
           }
           disabled={status !== "online" || sending}
-          className="h-9 border-0 bg-transparent font-mono focus:ring-0"
+  className="h-9 border-0 bg-transparent font-mono focus:ring-0"
           spellCheck={false}
           autoComplete="off"
         />

@@ -37,7 +37,7 @@ export async function listDirectory(serverId, relative = "") {
   const entries = await Promise.all(
     dirents
       // Internal bookkeeping; not the user's business.
-      .filter((d) => d.name !== ".packhost-rcon")
+      .filter((d) => d.name !== ".howlhost-rcon")
       .map(async (dirent) => {
         const full = path.join(target, dirent.name);
         let stat;
@@ -141,7 +141,7 @@ export async function downloadInto(serverId, dir, filename, url) {
 
   const response = await fetch(url, {
     redirect: "follow",
-    headers: { "user-agent": "Pack.Host-Agent/1.0" },
+    headers: { "user-agent": "Howl.Host-Agent/1.0" },
   });
 
   if (!response.ok) {

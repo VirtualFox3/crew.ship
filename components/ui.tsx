@@ -20,9 +20,9 @@ const buttonVariants: Record<ButtonVariant, string> = {
 };
 
 const buttonSizes: Record<ButtonSize, string> = {
-  sm: "h-8 px-3 text-xs gap-1.5 rounded-lg",
-  md: "h-10 px-4 text-sm gap-2 rounded-xl",
-  lg: "h-12 px-6 text-base gap-2.5 rounded-xl",
+  sm: "h-8 px-3 text-xs gap-1.5 ",
+  md: "h-10 px-4 text-sm gap-2 ",
+  lg: "h-12 px-6 text-base gap-2.5 ",
 };
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -42,13 +42,14 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
-      className={cn(
+  className={cn(
         "inline-flex items-center justify-center whitespace-nowrap transition-colors",
+        "font-mono uppercase tracking-wider",
         "focus-visible:outline-2 focus-visible:outline-offset-2",
         "disabled:pointer-events-none disabled:opacity-50",
         buttonSizes[size],
         buttonVariants[variant],
-        className,
+  className,
       )}
       disabled={disabled || loading}
       {...props}
@@ -84,9 +85,9 @@ export function Card({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn(
-        "rounded-2xl border border-ink-700/70 bg-ink-900/70 backdrop-blur",
-        className,
+  className={cn(
+        " border border-ink-700/70 bg-ink-900/70 backdrop-blur",
+  className,
       )}
       {...props}
     >
@@ -108,14 +109,18 @@ export function CardHeader({
 }) {
   return (
     <div
-      className={cn(
+  className={cn(
         "flex flex-wrap items-start justify-between gap-3 border-b border-ink-700/70 px-5 py-4",
-        className,
+  className,
       )}
     >
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold text-ink-100">{title}</h2>
-        {description && <p className="mt-1 text-xs text-ink-400">{description}</p>}
+        <h2 className="font-sans text-[15px] font-extrabold tracking-[-.02em] text-ink-100">
+          {title}
+        </h2>
+        {description && (
+          <p className="mt-1 font-mono text-[11px] text-ink-400">{description}</p>
+        )}
       </div>
       {action}
     </div>
@@ -141,10 +146,10 @@ export function Badge({
   };
   return (
     <span
-      className={cn(
+  className={cn(
         "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium",
         tones[tone],
-        className,
+  className,
       )}
     >
       {children}
@@ -157,7 +162,7 @@ export function Badge({
 /* -------------------------------------------------------------------------- */
 
 const fieldBase =
-  "w-full rounded-xl border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-ink-100 " +
+  "w-full  border border-ink-600 bg-ink-850 px-3 py-2 text-sm text-ink-100 " +
   "placeholder:text-ink-500 transition-colors focus:border-grass-500 focus:outline-none " +
   "focus:ring-2 focus:ring-grass-500/25 disabled:opacity-60";
 
@@ -235,20 +240,20 @@ export function Toggle({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="flex w-full items-center justify-between gap-4 rounded-xl border border-ink-700 bg-ink-850/60 px-4 py-3 text-left transition-colors hover:border-ink-600 disabled:opacity-60"
+  className="flex w-full items-center justify-between gap-4 border border-ink-700 bg-ink-850/60 px-4 py-3 text-left transition-colors hover:border-ink-600 disabled:opacity-60"
     >
       <span className="min-w-0">
         <span className="block text-sm text-ink-100">{label}</span>
         {description && <span className="mt-0.5 block text-xs text-ink-400">{description}</span>}
       </span>
       <span
-        className={cn(
+  className={cn(
           "relative h-6 w-11 shrink-0 rounded-full transition-colors",
           checked ? "bg-grass-500" : "bg-ink-600",
         )}
       >
         <span
-          className={cn(
+  className={cn(
             "absolute top-0.5 size-5 rounded-full bg-white transition-all",
             checked ? "left-[22px]" : "left-0.5",
           )}
@@ -323,15 +328,15 @@ export function StatusPill({
   const busy = status !== "online" && status !== "offline" && status !== "crashed";
   return (
     <span
-      className={cn(
+  className={cn(
         "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium",
         meta.ring,
         meta.text,
-        className,
+  className,
       )}
     >
       <span
-        className={cn("size-1.5 rounded-full", meta.dot, busy && "animate-pulse-dot")}
+  className={cn("size-1.5 rounded-full", meta.dot, busy && "animate-pulse-dot")}
       />
       {detail ?? meta.label}
     </span>
@@ -354,7 +359,7 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-ink-700 bg-ink-900/40 px-6 py-14 text-center">
+    <div className="flex flex-col items-center justify-center border border-dashed border-ink-700 bg-ink-900/40 px-6 py-14 text-center">
       {icon && <div className="mb-3 text-ink-500">{icon}</div>}
       <p className="text-sm font-medium text-ink-200">{title}</p>
       {description && <p className="mt-1 max-w-sm text-xs text-ink-400">{description}</p>}
@@ -379,7 +384,7 @@ export function Alert({
     success: "border-grass-500/30 bg-grass-500/10 text-grass-200",
   };
   return (
-    <div className={cn("rounded-xl border px-4 py-3 text-sm", tones[tone])}>
+    <div className={cn(" border px-4 py-3 text-sm", tones[tone])}>
       {title && <p className="font-semibold">{title}</p>}
       <div className={cn(title && "mt-1", "text-[13px] opacity-90")}>{children}</div>
     </div>
@@ -396,7 +401,7 @@ export function Stat({
   sub?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-ink-700/70 bg-ink-850/60 px-4 py-3">
+    <div className="border border-ink-700/70 bg-ink-850/60 px-4 py-3">
       <p className="text-[11px] uppercase tracking-wide text-ink-500">{label}</p>
       <p className="mt-1 text-lg font-semibold text-ink-100">{value}</p>
       {sub && <p className="mt-0.5 text-xs text-ink-400">{sub}</p>}
