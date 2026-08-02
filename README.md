@@ -1,11 +1,11 @@
-# Pack.Host
+# Howl.Host
 
 Free Minecraft server hosting. No ads, no plugin caps, no paid tier.
 
 An Aternos-style control panel and hosting stack, built to remove the limits
 that free hosts normally use as upsell pressure.
 
-| | Pack.Host | Typical free host |
+| | Howl.Host | Typical free host |
 |---|---|---|
 | Price | Free | Free with limits |
 | Ads | None | Interstitials + video |

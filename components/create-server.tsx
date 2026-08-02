@@ -64,7 +64,7 @@ export function CreateServer({ domain, suggested }: { domain: string; suggested:
   const [touchedSubdomain, setTouchedSubdomain] = useState(false);
   const [memory, setMemory] = useState(4096);
   const [slots, setSlots] = useState(100);
-  const [motd, setMotd] = useState("A Pack.Host server");
+  const [motd, setMotd] = useState("A Howl.Host server");
   const [gamemode, setGamemode] = useState("survival");
   const [difficulty, setDifficulty] = useState("normal");
   const [seed, setSeed] = useState("");
@@ -179,7 +179,7 @@ export function CreateServer({ domain, suggested }: { domain: string; suggested:
               <button
                 key={id}
                 onClick={() => setEdition(id)}
-                className={`rounded-2xl border p-4 text-left transition-colors ${
+  className={` border p-4 text-left transition-colors ${
                   edition === id
                     ? "border-grass-500 bg-grass-500/8"
                     : "border-ink-700 bg-ink-900/60 hover:border-ink-600"
@@ -187,7 +187,7 @@ export function CreateServer({ domain, suggested }: { domain: string; suggested:
               >
                 <div className="flex items-center justify-between">
                   <Icon
-                    className={`size-5 ${edition === id ? "text-grass-400" : "text-ink-400"}`}
+  className={`size-5 ${edition === id ? "text-grass-400" : "text-ink-400"}`}
                   />
                   {badge && <Badge tone="violet">{badge}</Badge>}
                 </div>
@@ -212,7 +212,7 @@ export function CreateServer({ domain, suggested }: { domain: string; suggested:
                 onClick={() => !s.unavailable && setSoftware(s.id)}
                 disabled={Boolean(s.unavailable)}
                 title={s.unavailable ?? undefined}
-                className={`rounded-2xl border p-4 text-left transition-colors ${
+  className={` border p-4 text-left transition-colors ${
                   s.unavailable
                     ? "cursor-not-allowed border-ink-800 bg-ink-900/30 opacity-55"
                     : software === s.id
@@ -258,7 +258,7 @@ export function CreateServer({ domain, suggested }: { domain: string; suggested:
                 type="checkbox"
                 checked={showUnstable}
                 onChange={(e) => setShowUnstable(e.target.checked)}
-                className="size-4 rounded border-ink-600 bg-ink-850 accent-grass-500"
+  className="size-4 rounded border-ink-600 bg-ink-850 accent-grass-500"
               />
               Show snapshots &amp; pre-releases
             </label>
@@ -275,7 +275,7 @@ export function CreateServer({ domain, suggested }: { domain: string; suggested:
                   <button
                     key={v.id}
                     onClick={() => setVersion(v.id)}
-                    className={`rounded-lg border px-2 py-2 text-center text-xs transition-colors ${
+  className={` border px-2 py-2 text-center text-xs transition-colors ${
                       version === v.id
                         ? "border-grass-500 bg-grass-500/12 text-grass-300"
                         : "border-transparent bg-ink-850 text-ink-300 hover:bg-ink-800"
@@ -453,12 +453,12 @@ function Steps({ step }: { step: number }) {
       {STEP_LABELS.map((label, i) => (
         <li key={label} className="flex flex-1 items-center gap-2">
           <div
-            className={`flex items-center gap-2 text-xs ${
+  className={`flex items-center gap-2 text-xs ${
               i <= step ? "text-grass-300" : "text-ink-500"
             }`}
           >
             <span
-              className={`grid size-6 shrink-0 place-items-center rounded-full border text-[11px] font-semibold ${
+  className={`grid size-6 shrink-0 place-items-center rounded-full border text-[11px] font-semibold ${
                 i < step
                   ? "border-grass-500 bg-grass-500 text-ink-950"
                   : i === step
@@ -472,7 +472,7 @@ function Steps({ step }: { step: number }) {
           </div>
           {i < STEP_LABELS.length - 1 && (
             <span
-              className={`h-px flex-1 ${i < step ? "bg-grass-500/50" : "bg-ink-700"}`}
+  className={`h-px flex-1 ${i < step ? "bg-grass-500/50" : "bg-ink-700"}`}
             />
           )}
         </li>

@@ -38,4 +38,4 @@ export const siteUrl = () =>
   "http://localhost:3000";
 
 /** Root domain servers get their address under: <subdomain>.<ROOT>. */
-export const serverDomain = () => optionalEnv("NEXT_PUBLIC_SERVER_DOMAIN") ?? "pack.host";
+export const serverDomain = () => optionalEnv("NEXT_PUBLIC_SERVER_DOMAIN") ?? "howl.host";

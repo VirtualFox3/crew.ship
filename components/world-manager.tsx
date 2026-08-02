@@ -152,7 +152,7 @@ export function WorldManager({
           <Field
             label="Seed"
             hint="Leave empty for a random world."
-            className="min-w-48 flex-1"
+  className="min-w-48 flex-1"
           >
             <Input
               value={seed}

@@ -1,62 +1,248 @@
 @import "tailwindcss";
 
+/*
+  Howl.Host has two visual registers, and mixing them is the main thing to
+  avoid.
+
+  1. The marketing pages are a pixel-slab launcher: Pixelify Sans in caps,
+     chunky 3px inset outlines, hard shadows, no rounded corners. Loud.
+  2. The panel is calm and themeable: Bricolage Grotesque headings, IBM Plex
+     Mono for anything machine-generated, 1px hairlines. It is a tool people
+     leave open for hours.
+
+  Panel colours come from CSS variables set per-theme on the app shell, so the
+  whole panel re-skins without a single component knowing which theme is on.
+*/
+
 @theme {
-  --color-ink-950: #07090c;
-  --color-ink-900: #0b0f14;
-  --color-ink-850: #0f141b;
-  --color-ink-800: #141b24;
-  --color-ink-700: #1c2632;
-  --color-ink-600: #2a3644;
-  --color-ink-500: #3d4c5e;
-  --color-ink-400: #6b7c91;
-  --color-ink-300: #97a6ba;
-  --color-ink-200: #c7d2e0;
-  --color-ink-100: #e8eef6;
+  /* --- Pixel-slab register (marketing) ------------------------------- */
+  --color-slab-void: #0e0f0e;
+  --color-slab-bar: #111211;
+  --color-slab-face: #2b2d2b;
+  --color-slab-hover: #353835;
+  --color-slab-edge: #4a4d4a;
+  --color-slab-dim: #7b807b;
+  --color-slab-muted: #8d928d;
+  --color-slab-soft: #9aa09a;
+  --color-slab-ink: #dfe3df;
 
-  --color-grass-50: #ecfdf3;
-  --color-grass-300: #6ee7a3;
-  --color-grass-400: #37d67f;
-  --color-grass-500: #16bf68;
-  --color-grass-600: #0f9d55;
-  --color-grass-700: #0b7a43;
+  --color-amber-400: #ffb228;
+  --color-amber-500: #f5a623;
+  --color-amber-600: #c8801a;
+  --color-amber-700: #8f5a0d;
 
-  --color-lava-400: #ff7a45;
-  --color-lava-500: #f4531f;
+  --color-lime-400: #7bea3c;
+  --color-lime-500: #62d62c;
+  --color-sky-400: #5ec8f0;
+  --color-sky-500: #3aa8d8;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --color-status-up: #7fd96a;
+  --color-status-warn: #f2b13c;
+  --color-status-down: #e05c3c;
+  --color-status-info: #5ad1e0;
+
+  --font-display: "Pixelify Sans", ui-monospace, monospace;
+  --font-sans: "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /*
+    --- Panel scale ----------------------------------------------------
+    Derived from the design's own "Warm dark" theme (bg #17110c, ink
+    #f6eee1) rather than Teal, because Teal is a light theme and the panel
+    surfaces are built dark-first. Teal and the rest still live in
+    lib/theme.ts for the theme switcher.
+
+    These keep the existing ink- and grass- names the panel already uses, so
+    every screen picks up the new brand without a rewrite. New work should
+    prefer the th- utilities, which follow the active theme.
+  */
+  --color-ink-950: #100b07;
+  --color-ink-900: #17110c;
+  --color-ink-850: #1d160f;
+  --color-ink-800: #241b12;
+  --color-ink-700: #2e2318;
+  --color-ink-600: #3b2d1e;
+  --color-ink-500: #5b4732;
+  --color-ink-400: #9c8b76;
+  --color-ink-300: #c4b6a1;
+  --color-ink-200: #e2d8c8;
+  --color-ink-100: #f6eee1;
+
+  --color-grass-50: #fdf6e8;
+  --color-grass-300: #ffd07a;
+  --color-grass-400: #ffb228;
+  --color-grass-500: #f2b13c;
+  --color-grass-600: #c8801a;
+  --color-grass-700: #8f5a0d;
 }
 
 :root {
   color-scheme: dark;
+
+  /* Panel defaults; the shell overrides these per theme. */
+  --th-bg: #4fd1c0;
+  --th-panel: #6bdccd;
+  --th-hero: #89e6da;
+  --th-ink: #031412;
+  --th-soft: rgba(3, 20, 18, 0.6);
+  --th-line: rgba(3, 20, 18, 0.18);
+  --th-accent: #1b1409;
 }
 
 html,
 body {
-  background: var(--color-ink-950);
-  color: var(--color-ink-100);
+  margin: 0;
+  background: var(--color-slab-void);
+  color: var(--color-slab-ink);
   -webkit-font-smoothing: antialiased;
-}
-
-body {
   font-family: var(--font-sans);
 }
 
-/* Subtle grid + glow used behind hero and empty states. */
-.bg-grid {
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 44px 44px;
+/* --- Pixel-slab primitives -------------------------------------------- */
+
+/*
+  Slabs draw their border with an inset shadow rather than `border`, so the
+  3px edge never changes the box size and buttons stay on the pixel grid when
+  they light up on hover.
+*/
+.slab {
+  box-shadow: inset 0 0 0 3px var(--color-slab-edge);
+  transition: box-shadow 120ms steps(2, end), background-color 120ms steps(2, end),
+    color 120ms steps(2, end);
+}
+.slab-face {
+  background: var(--color-slab-face);
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.07);
+}
+.slab-face:hover {
+  background: var(--color-slab-hover);
+  color: var(--color-slab-ink);
+}
+.slab-amber {
+  background: linear-gradient(180deg, #4a3208, #231903 60%, #141310);
+  color: var(--color-amber-500);
+}
+.slab-amber:hover {
+  box-shadow: inset 0 0 0 3px var(--color-amber-500);
+}
+.slab-amber-on {
+  background: linear-gradient(#4a3208, #1e1505);
+  box-shadow: inset 0 0 0 3px var(--color-amber-500);
+  color: var(--color-amber-400);
+}
+.slab-sky {
+  background: linear-gradient(180deg, #1c4a63, #10222d 65%, #0b171f);
+  box-shadow: inset 0 0 0 3px var(--color-sky-500);
+  color: var(--color-sky-400);
+}
+.slab-sky:hover {
+  box-shadow: inset 0 0 0 3px var(--color-sky-400);
+}
+.slab-lime {
+  background: linear-gradient(#1d3310, #0d1a07);
+  box-shadow: inset 0 0 0 3px var(--color-lime-500);
+  color: var(--color-lime-400);
 }
 
-.glow-grass {
-  background: radial-gradient(
-    60% 60% at 50% 0%,
-    rgba(22, 191, 104, 0.22) 0%,
-    rgba(22, 191, 104, 0) 70%
-  );
+/* The logo tile's single notched corner, straight from the design. */
+.notch-br {
+  border-radius: 0 0 14px 0;
 }
+
+/* Hard offset shadow — no blur, so display type reads as pixel art. */
+.pixel-shadow {
+  text-shadow: 4px 4px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Checkerboard used behind the hero, matching the design's 16px pattern. */
+.pixel-field {
+  background-color: #141a12;
+  background-image:
+    linear-gradient(45deg, #182015 25%, transparent 25%, transparent 75%, #182015 75%),
+    linear-gradient(45deg, #182015 25%, transparent 25%, transparent 75%, #182015 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+/* --- Panel primitives -------------------------------------------------- */
+
+.th-page {
+  background: var(--th-bg);
+  color: var(--th-ink);
+}
+.th-panel {
+  background: var(--th-panel);
+  border: 1px solid var(--th-line);
+}
+.th-hero {
+  background: var(--th-hero);
+}
+.th-soft {
+  color: var(--th-soft);
+}
+.th-line {
+  border-color: var(--th-line);
+}
+.th-accent {
+  color: var(--th-accent);
+}
+
+/* --- Motion ------------------------------------------------------------ */
+
+@keyframes blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  55% {
+    opacity: 0;
+  }
+  60%,
+  100% {
+    opacity: 1;
+  }
+}
+.animate-blink {
+  animation: blink 4s steps(1, end) infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.4s steps(3, end) infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-rise {
+  animation: rise 0.3s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-blink,
+  .animate-pulse-dot,
+  .animate-rise {
+    animation: none;
+  }
+}
+
+/* --- Scrollbars -------------------------------------------------------- */
 
 ::-webkit-scrollbar {
   width: 10px;
@@ -66,48 +252,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-ink-700);
-  border-radius: 999px;
+  background: var(--color-slab-edge);
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-ink-600);
+  background: var(--color-slab-muted);
   background-clip: content-box;
-}
-
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(0.82);
-  }
-}
-.animate-pulse-dot {
-  animation: pulse-dot 1.6s ease-in-out infinite;
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-.animate-rise {
-  animation: rise 0.4s ease-out both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-pulse-dot,
-  .animate-rise {
-    animation: none;
-  }
 }

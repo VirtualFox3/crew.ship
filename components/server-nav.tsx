@@ -62,8 +62,8 @@ export function ServerNav({
           <Link
             key={href}
             href={href}
-            className={cn(
-              "flex shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-sm transition-colors",
+  className={cn(
+              "flex shrink-0 items-center gap-2.5  px-3 py-2 text-sm transition-colors",
               active
                 ? "bg-grass-500/12 font-medium text-grass-300"
                 : "text-ink-400 hover:bg-ink-800 hover:text-ink-100",

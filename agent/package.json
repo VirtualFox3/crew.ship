@@ -1,9 +1,9 @@
 {
-  "name": "packhost-agent",
+  "name": "howlhost-agent",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Pack.Host node agent \u2014 runs Minecraft servers in Docker and exposes them to the panel.",
+  "description": "Howl.Host node agent \u2014 runs Minecraft servers in Docker and exposes them to the panel.",
   "engines": {
     "node": ">=20"
   },

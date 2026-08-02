@@ -1,8 +1,8 @@
 {
-  "name": "pack-host",
+  "name": "howl-host",
   "version": "1.0.0",
   "private": true,
-  "description": "Pack.Host \u2014 free, unlimited Minecraft server hosting panel (Java + Bedrock)",
+  "description": "Howl.Host \u2014 free, unlimited Minecraft server hosting panel (Java + Bedrock)",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

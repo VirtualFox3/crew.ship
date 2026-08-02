@@ -133,7 +133,7 @@ export function AccessManager({
               return (
                 <li key={member.user_id} className="px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-ink-800 text-xs font-semibold text-ink-300">
+                    <div className="grid size-8 shrink-0 place-items-center bg-ink-800 text-xs font-semibold text-ink-300">
                       {(member.profiles?.username ?? "?").slice(0, 2).toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -168,7 +168,7 @@ export function AccessManager({
                           variant="ghost"
                           loading={busy === member.user_id && !open}
                           onClick={() => revoke(member)}
-                          className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
                           title="Remove access"
                         >
                           <Trash2 className="size-3.5" />
@@ -178,7 +178,7 @@ export function AccessManager({
                   </div>
 
                   {open && (
-                    <div className="mt-3 rounded-xl border border-ink-700 bg-ink-900/60 p-3">
+                    <div className="mt-3 border border-ink-700 bg-ink-900/60 p-3">
                       <PermissionPicker value={draft} onChange={setDraft} />
                       <div className="mt-3 flex justify-end gap-2">
                         <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
@@ -213,13 +213,13 @@ export function AccessManager({
         <Card>
           <CardHeader
             title="Invite someone"
-            description="They need a free Pack.Host account first. Playing needs no account — only the server address."
+            description="They need a free Howl.Host account first. Playing needs no account — only the server address."
           />
           <form onSubmit={invite} className="space-y-4 p-5">
             <Field
-              label="Pack.Host username"
+              label="Howl.Host username"
               hint="Not their email or Minecraft name — the username they signed up with."
-              className="max-w-sm"
+  className="max-w-sm"
             >
               <Input
                 value={username}

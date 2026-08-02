@@ -189,12 +189,12 @@ export function AddonBrowser({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex rounded-xl border border-ink-700 bg-ink-900 p-1">
+        <div className="flex border border-ink-700 bg-ink-900 p-1">
           {(["browse", "installed"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
+  className={` px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
                 tab === t ? "bg-grass-500 text-ink-950" : "text-ink-400 hover:text-ink-100"
               }`}
             >
@@ -221,7 +221,7 @@ export function AddonBrowser({
                     placeholder={
                       kind === "mod" ? "create, sodium, jei…" : "essentials, luckperms, worldedit…"
                     }
-                    className="pl-9"
+  className="pl-9"
                   />
                 </div>
               </Field>
@@ -241,7 +241,7 @@ export function AddonBrowser({
                   type="checkbox"
                   checked={matchVersion}
                   onChange={(e) => setMatchVersion(e.target.checked)}
-                  className="size-4 rounded border-ink-600 bg-ink-850 accent-grass-500"
+  className="size-4 rounded border-ink-600 bg-ink-850 accent-grass-500"
                 />
                 Only {gameVersion}
               </label>
@@ -277,7 +277,7 @@ export function AddonBrowser({
               <Field
                 label="Install from a direct URL"
                 hint="Any public .jar link — useful for private or unlisted builds."
-                className="min-w-64 flex-1"
+  className="min-w-64 flex-1"
               >
                 <div className="relative">
                   <Link2 className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-500" />
@@ -285,12 +285,12 @@ export function AddonBrowser({
                     value={manualUrl}
                     onChange={(e) => setManualUrl(e.target.value)}
                     placeholder="https://example.com/MyPlugin.jar"
-                    className="pl-9"
+  className="pl-9"
                   />
                 </div>
               </Field>
               <Button
-                className="mb-6"
+  className="mb-6"
                 variant="secondary"
                 loading={working === "url"}
                 onClick={installFromUrl}
@@ -314,7 +314,7 @@ export function AddonBrowser({
           <ul className="divide-y divide-ink-800">
             {installed.map((addon) => (
               <li key={addon.id} className="flex items-center gap-3 px-5 py-3">
-                <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg bg-ink-800">
+                <div className="grid size-9 shrink-0 place-items-center overflow-hidden bg-ink-800">
                   {addon.icon_url ? (
                     // Remote icons vary wildly in size; plain img keeps it simple.
                     // eslint-disable-next-line @next/next/no-img-element
@@ -350,7 +350,7 @@ export function AddonBrowser({
                   loading={working === addon.id}
                   onClick={() => remove(addon)}
                   title="Uninstall"
-                  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
                 >
                   <Trash2 className="size-3.5" />
                 </Button>
@@ -383,7 +383,7 @@ function CatalogCard({
 }) {
   return (
     <Card className="flex gap-3 p-4">
-      <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-ink-800">
+      <div className="grid size-11 shrink-0 place-items-center overflow-hidden bg-ink-800">
         {item.iconUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={item.iconUrl} alt="" className="size-full object-cover" />
@@ -399,7 +399,7 @@ function CatalogCard({
             href={item.pageUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="shrink-0 text-ink-500 hover:text-ink-300"
+  className="shrink-0 text-ink-500 hover:text-ink-300"
             title="Open project page"
           >
             <ExternalLink className="size-3.5" />

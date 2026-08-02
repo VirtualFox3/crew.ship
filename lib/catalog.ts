@@ -9,7 +9,7 @@ import type { AddonKind, CatalogItem } from "./types";
  * is a property of the system, not a plan.
  */
 
-const UA = { "user-agent": "Pack.Host/1.0 (+https://pack.host)" };
+const UA = { "user-agent": "Howl.Host/1.0 (+https://howl.host)" };
 
 export interface CatalogQuery {
   q?: string;

@@ -297,7 +297,7 @@ export function OptionsForm({
           <div className="flex flex-wrap items-end gap-3 p-5">
             <Field
               label={`Type "${server.name}" to confirm`}
-              className="min-w-56 flex-1"
+  className="min-w-56 flex-1"
             >
               <Input
                 value={confirmName}

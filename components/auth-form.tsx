@@ -90,7 +90,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
       <div className="relative w-full max-w-sm">
         <Link href="/" className="mb-8 flex items-center justify-center gap-2.5">
-          <span className="grid size-9 place-items-center rounded-lg bg-grass-500 text-ink-950">
+          <span className="grid size-9 place-items-center bg-grass-500 text-ink-950">
             <Server className="size-5" strokeWidth={2.5} />
           </span>
           <span className="text-lg font-semibold tracking-tight">
@@ -98,7 +98,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
           </span>
         </Link>
 
-        <div className="rounded-2xl border border-ink-700/70 bg-ink-900/80 p-6 backdrop-blur">
+        <div className="border border-ink-700/70 bg-ink-900/80 p-6 backdrop-blur">
           <h1 className="text-xl font-semibold">
             {signup ? "Create your account" : "Welcome back"}
           </h1>
@@ -172,7 +172,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
             {signup ? "Already have an account? " : "New here? "}
             <Link
               href={signup ? "/login" : "/signup"}
-              className="font-medium text-grass-400 hover:text-grass-300"
+  className="font-medium text-grass-400 hover:text-grass-300"
             >
               {signup ? "Log in" : "Create one free"}
             </Link>

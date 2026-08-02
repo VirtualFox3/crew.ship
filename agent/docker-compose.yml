@@ -1,7 +1,7 @@
 services:
   agent:
     build: .
-    container_name: packhost-agent
+    container_name: howlhost-agent
     restart: unless-stopped
     env_file: .env
     ports:
@@ -15,9 +15,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Worlds, plugins and backups. Must be the same path inside and out,
       # because the paths in bind mounts are resolved by the host's daemon.
-      - /var/lib/packhost:/var/lib/packhost
+      - /var/lib/howlhost:/var/lib/howlhost
     environment:
-      DATA_DIR: /var/lib/packhost
+      DATA_DIR: /var/lib/howlhost
 
   # playit.gg tunnel. Optional: only started with `--profile tunnel`, which
   # install.sh does when you supply a secret key.
@@ -30,7 +30,7 @@ services:
   # directly, without linking each one.
   playit:
     image: ghcr.io/playit-cloud/playit-agent:0.15
-    container_name: packhost-playit
+    container_name: howlhost-playit
     restart: unless-stopped
     network_mode: host
     profiles: ["tunnel"]

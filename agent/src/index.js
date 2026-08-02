@@ -315,11 +315,11 @@ async function queryPlayers(id) {
 
 async function runningIds() {
   const containers = await docker
-    .listContainers({ filters: { label: [`host.pack.node=${config.nodeId}`] } })
+    .listContainers({ filters: { label: [`host.howl.node=${config.nodeId}`] } })
     .catch(() => []);
 
   return new Set(
-    containers.map((c) => c.Labels?.["host.pack.server"]).filter(Boolean),
+    containers.map((c) => c.Labels?.["host.howl.server"]).filter(Boolean),
   );
 }
 
@@ -376,7 +376,7 @@ wss.on("connection", async (ws, _request, serverId) => {
   try {
     const found = await getContainer(serverId);
     if (!found) {
-      ws.send("[Pack.Host] This server has not been provisioned on a node yet.");
+      ws.send("[Howl.Host] This server has not been provisioned on a node yet.");
       ws.close();
       return;
     }
@@ -394,7 +394,7 @@ wss.on("connection", async (ws, _request, serverId) => {
     logStream.on("error", () => ws.close());
     logStream.on("end", () => ws.close());
   } catch (err) {
-    if (ws.readyState === ws.OPEN) ws.send(`[Pack.Host] ${err.message}`);
+    if (ws.readyState === ws.OPEN) ws.send(`[Howl.Host] ${err.message}`);
     ws.close();
   }
 

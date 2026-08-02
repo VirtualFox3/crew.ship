@@ -105,7 +105,7 @@ export function SoftwareSwitcher({
             <button
               key={s.id}
               onClick={() => setSoftware(s.id)}
-              className={`rounded-xl border p-4 text-left transition-colors ${
+  className={` border p-4 text-left transition-colors ${
                 software === s.id
                   ? "border-grass-500 bg-grass-500/8"
                   : "border-ink-700 bg-ink-850/50 hover:border-ink-600"
@@ -134,7 +134,7 @@ export function SoftwareSwitcher({
                 type="checkbox"
                 checked={showUnstable}
                 onChange={(e) => setShowUnstable(e.target.checked)}
-                className="size-4 rounded border-ink-600 bg-ink-850 accent-grass-500"
+  className="size-4 rounded border-ink-600 bg-ink-850 accent-grass-500"
               />
               Snapshots
             </label>
@@ -151,7 +151,7 @@ export function SoftwareSwitcher({
                 <button
                   key={v.id}
                   onClick={() => setVersion(v.id)}
-                  className={`rounded-lg border px-2 py-2 text-center font-mono text-xs transition-colors ${
+  className={` border px-2 py-2 text-center font-mono text-xs transition-colors ${
                     version === v.id
                       ? "border-grass-500 bg-grass-500/12 text-grass-300"
                       : "border-transparent bg-ink-850 text-ink-300 hover:bg-ink-800"

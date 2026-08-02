@@ -171,7 +171,7 @@ export function FileManager({ serverId }: { serverId: string }) {
             setDirty(true);
           }}
           spellCheck={false}
-          className="h-[480px] resize-none rounded-none border-0 bg-ink-950/80 font-mono text-xs leading-relaxed focus:ring-0"
+  className="h-[480px] resize-none rounded-none border-0 bg-ink-950/80 font-mono text-xs leading-relaxed focus:ring-0"
         />
       </Card>
     );
@@ -187,7 +187,7 @@ export function FileManager({ serverId }: { serverId: string }) {
             <div className="flex flex-wrap items-center gap-1 text-xs">
               <button
                 onClick={() => load("")}
-                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-ink-300 hover:bg-ink-800"
+  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-ink-300 hover:bg-ink-800"
               >
                 <Home className="size-3.5" />
                 server
@@ -197,7 +197,7 @@ export function FileManager({ serverId }: { serverId: string }) {
                   <ChevronRight className="size-3 text-ink-600" />
                   <button
                     onClick={() => load(crumbs.slice(0, i + 1).join("/"))}
-                    className="rounded px-1.5 py-0.5 font-mono text-ink-300 hover:bg-ink-800"
+  className="rounded px-1.5 py-0.5 font-mono text-ink-300 hover:bg-ink-800"
                   >
                     {crumb}
                   </button>
@@ -247,7 +247,7 @@ export function FileManager({ serverId }: { serverId: string }) {
               <li>
                 <button
                   onClick={() => load(crumbs.slice(0, -1).join("/"))}
-                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-ink-400 hover:bg-ink-850"
+  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-ink-400 hover:bg-ink-850"
                 >
                   <Folder className="size-4" />
                   ..
@@ -258,7 +258,7 @@ export function FileManager({ serverId }: { serverId: string }) {
               <li key={entry.path} className="group flex items-center gap-3 px-4 hover:bg-ink-850">
                 <button
                   onClick={() => open(entry)}
-                  className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left"
+  className="flex min-w-0 flex-1 items-center gap-3 py-2.5 text-left"
                 >
                   {entry.directory ? (
                     <Folder className="size-4 shrink-0 text-grass-400" />
@@ -277,7 +277,7 @@ export function FileManager({ serverId }: { serverId: string }) {
                 </button>
                 <button
                   onClick={() => remove(entry)}
-                  className="rounded p-1.5 text-ink-600 opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
+  className="rounded p-1.5 text-ink-600 opacity-0 transition-opacity hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
                   title="Delete"
                 >
                   <Trash2 className="size-3.5" />

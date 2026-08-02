@@ -29,7 +29,7 @@ export const config = {
   maxServers: Number(env("MAX_SERVERS", 40)),
   maxMemoryMb: Number(env("MAX_MEMORY_MB", 32768)),
 
-  dataDir: env("DATA_DIR", "/var/lib/packhost"),
+  dataDir: env("DATA_DIR", "/var/lib/howlhost"),
 
   images: {
     java: env("JAVA_IMAGE", "itzg/minecraft-server:latest"),

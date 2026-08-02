@@ -11,7 +11,7 @@ import { directorySize } from "./files.js";
  */
 
 // Regenerated on start, or huge and not worth capturing.
-const EXCLUDED = new Set(["cache", "libraries", "versions", "logs", ".packhost-rcon"]);
+const EXCLUDED = new Set(["cache", "libraries", "versions", "logs", ".howlhost-rcon"]);
 
 export async function createBackup(serverId, name) {
   const source = serverDir(serverId);
@@ -147,7 +147,7 @@ export async function writeProperties(serverId, patch) {
 
   const body = [...existing.entries()].map(([k, v]) => `${k}=${v}`).join("\n");
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, `# Managed by Pack.Host\n${body}\n`);
+  await fs.writeFile(file, `# Managed by Howl.Host\n${body}\n`);
 }
 
 /** Deletes the active world so the server regenerates it on next start. */

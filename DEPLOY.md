@@ -1,4 +1,4 @@
-# Deploying Pack.Host
+# Deploying Howl.Host
 
 Three pieces, in this order:
 
@@ -191,7 +191,7 @@ PUBLIC_HOST=node1.example.com \
 Or do it by hand:
 
 ```bash
-git clone <this repo> packhost && cd packhost/agent
+git clone <this repo> howlhost && cd howlhost/agent
 cp .env.example .env
 ```
 
@@ -206,13 +206,13 @@ PORT_RANGE_START=25600
 PORT_RANGE_END=25999
 MAX_SERVERS=40
 MAX_MEMORY_MB=32768
-DATA_DIR=/var/lib/packhost
+DATA_DIR=/var/lib/howlhost
 ```
 
 Then:
 
 ```bash
-sudo mkdir -p /var/lib/packhost
+sudo mkdir -p /var/lib/howlhost
 docker compose up -d --build
 docker compose logs -f
 ```
@@ -237,7 +237,7 @@ machine or a NAT'd box possible, and it is free.
 1. Sign up at [playit.gg](https://playit.gg) and copy your **secret key** from
    Account → Settings.
 2. Give it to `install.sh` when prompted, or pass `PLAYIT_SECRET_KEY=...`. The
-   installer starts the tunnel agent alongside the Pack.Host agent.
+   installer starts the tunnel agent alongside the Howl.Host agent.
 3. For each server, add a tunnel at
    [playit.gg/account/tunnels](https://playit.gg/account/tunnels) pointing at
    the node-local port (handed out from 25600 upward), then record the mapping:
@@ -270,7 +270,7 @@ does not resolve:
 | 3 | Wildcard DNS, if `NEXT_PUBLIC_SERVER_DOMAIN` is set to a domain you own | `myserver.example.com:25601` |
 | 4 | The node's own host or IP | `203.0.113.5:25601` |
 
-If `NEXT_PUBLIC_SERVER_DOMAIN` is left at the `pack.host` placeholder it is
+If `NEXT_PUBLIC_SERVER_DOMAIN` is left at the `howl.host` placeholder it is
 skipped entirely — otherwise the panel would advertise a domain you do not
 control.
 
@@ -292,14 +292,14 @@ Caddy handles the certificate and the WebSocket upgrade with no extra config.
 Point a wildcard at the node so every server gets an address:
 
 ```
-*.pack.host.  A     <node public IP>
+*.howl.host.  A     <node public IP>
 ```
 
 For a port-free Java address, add an SRV record per server (or automate it with
 your DNS provider's API):
 
 ```
-_minecraft._tcp.<subdomain>.pack.host.  SRV  0 0 <port> <subdomain>.pack.host.
+_minecraft._tcp.<subdomain>.howl.host.  SRV  0 0 <port> <subdomain>.howl.host.
 ```
 
 Bedrock clients always need the port typed in — the panel shows it.
