@@ -1,15 +1,15 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { ApiError, handler, logEvent, ok, readJson } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireEnv } from "@/lib/env";
+import { nodeSecret } from "@/lib/agent";
 import { promoteFromQueue } from "@/lib/provision";
 
 export const dynamic = "force-dynamic";
 
-function assertAgent(request: Request) {
+function assertAgent(request: Request, nodeId: string) {
   const token = (request.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
   const a = createHash("sha256").update(token).digest();
-  const b = createHash("sha256").update(requireEnv("AGENT_SHARED_SECRET")).digest();
+  const b = createHash("sha256").update(nodeSecret(nodeId)).digest();
   if (!timingSafeEqual(a, b)) throw new ApiError("Bad agent credentials.", 401);
 }
 
@@ -18,8 +18,6 @@ function assertAgent(request: Request) {
  * would report too late, like an idle auto-stop or a crash loop.
  */
 export const POST = handler(async (request: Request) => {
-  assertAgent(request);
-
   const body = await readJson<{
     serverId: string;
     status: "online" | "starting" | "stopping" | "offline" | "crashed";
@@ -39,6 +37,8 @@ export const POST = handler(async (request: Request) => {
     .maybeSingle();
 
   if (!server) throw new ApiError("Unknown server.", 404);
+  if (!server.node_id) throw new ApiError("Server has no host computer.", 409);
+  assertAgent(request, server.node_id);
 
   const patch: Record<string, unknown> = {
     status: body.status,

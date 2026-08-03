@@ -7,6 +7,8 @@ import { SetupNotice } from "@/components/setup-notice";
 import { createClient } from "@/lib/supabase/server";
 import { isConfigured } from "@/lib/env";
 import type { Profile } from "@/lib/types";
+import type { Node } from "@/lib/types";
+import { HostComputer } from "@/components/host-computer";
 
 export const metadata: Metadata = { title: "Account" };
 export const dynamic = "force-dynamic";
@@ -20,9 +22,10 @@ export default async function AccountPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const [{ data: profile }, { count: serverCount }] = await Promise.all([
+  const [{ data: profile }, { count: serverCount }, { data: nodes }] = await Promise.all([
     supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
     supabase.from("servers").select("id", { count: "exact", head: true }).eq("owner_id", user.id),
+    supabase.from("nodes").select("*").order("created_at"),
   ]);
 
   const p = profile as Profile | null;
@@ -95,6 +98,8 @@ export default async function AccountPage() {
           Your email, a username, and the servers you create. No analytics, no advertising
           identifiers, no third-party trackers — the panel has none to sell.
         </Alert>
+
+        <HostComputer initialNodes={(nodes as Node[] | null) ?? []} />
 
         <Card>
           <CardHeader

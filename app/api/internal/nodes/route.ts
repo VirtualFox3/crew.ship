@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { handler, ApiError, ok, readJson } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireEnv } from "@/lib/env";
+import { nodeSecret } from "@/lib/agent";
 import { promoteFromQueue } from "@/lib/provision";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +13,10 @@ export const dynamic = "force-dynamic";
  * shared secret rather than a user session. It is excluded from the auth
  * middleware (see middleware.ts matcher).
  */
-function assertAgent(request: Request) {
+function assertAgent(request: Request, nodeId: string) {
   const header = request.headers.get("authorization") ?? "";
   const token = header.replace(/^Bearer\s+/i, "");
-  const expected = requireEnv("AGENT_SHARED_SECRET");
+  const expected = nodeSecret(nodeId);
   // Hash both sides so the comparison is constant-length as well as constant-time.
   const a = createHash("sha256").update(token).digest();
   const b = createHash("sha256").update(expected).digest();
@@ -38,10 +38,9 @@ interface Heartbeat {
 }
 
 export const POST = handler(async (request: Request) => {
-  assertAgent(request);
-
   const body = await readJson<Heartbeat>(request);
   if (!body.nodeId) throw new ApiError("Missing nodeId.");
+  assertAgent(request, body.nodeId);
 
   const admin = createAdminClient();
 

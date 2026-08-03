@@ -46,6 +46,7 @@ export interface Profile {
 
 export interface Node {
   id: string;
+  owner_id: string;
   name: string;
   region: string;
   arch: NodeArch;

@@ -17,7 +17,7 @@ export const POST = handler(async (_request: Request, { params }: Params) => {
   const ctx = await serverContext(id, { require: "console" });
   const node = requireNode(ctx);
 
-  const token = issueConsoleToken(id);
+  const token = issueConsoleToken(id, node.id);
 
   return ok({
     url: consoleUrl(node, id, token),

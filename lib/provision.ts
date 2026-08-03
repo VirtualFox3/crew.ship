@@ -11,8 +11,12 @@ import type { Node, Server, ServerAddon } from "@/lib/types";
  * the fleet nothing, which is what makes "free" affordable.
  */
 
-export async function onlineNodes(admin: SupabaseClient): Promise<Node[]> {
-  const { data } = await admin.from("nodes").select("*").eq("status", "online");
+export async function onlineNodes(admin: SupabaseClient, ownerId: string): Promise<Node[]> {
+  const { data } = await admin
+    .from("nodes")
+    .select("*")
+    .eq("owner_id", ownerId)
+    .eq("status", "online");
   return (data as Node[] | null) ?? [];
 }
 
@@ -49,7 +53,7 @@ export async function place(
     (server.node_id
       ? ((await admin.from("nodes").select("*").eq("id", server.node_id).maybeSingle())
           .data as Node | null)
-      : null) ?? selectNode(await onlineNodes(admin), server.memory_mb);
+      : null) ?? selectNode(await onlineNodes(admin, server.owner_id), server.memory_mb);
 
   if (!node || node.status !== "online") return null;
 
@@ -248,15 +252,18 @@ export async function promoteFromQueue(admin: SupabaseClient): Promise<void> {
     .select("*")
     .eq("status", "queued")
     .order("updated_at", { ascending: true })
-    .limit(1);
+    .limit(50);
 
-  const next = (data as Server[] | null)?.[0];
-  if (!next) return;
-
-  try {
-    await startServer(admin, next);
-  } catch {
-    // The next stop event will try again; never fail the caller's request.
+  // Queues are per owner: an offline home computer must not block another
+  // owner's online computer from accepting its next server.
+  for (const next of (data as Server[] | null) ?? []) {
+    if (!(await place(admin, next))) continue;
+    try {
+      await startServer(admin, next);
+    } catch {
+      // The next stop/heartbeat will retry; never fail the caller's request.
+    }
+    return;
   }
 }
 

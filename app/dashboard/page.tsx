@@ -33,7 +33,8 @@ export default async function DashboardPage() {
   try {
     const { data } = await createAdminClient()
       .from("nodes")
-      .select("id, public_host, tunnel_host, tunnel_ports");
+      .select("id, public_host, tunnel_host, tunnel_ports")
+      .eq("owner_id", user.id);
     nodes = Object.fromEntries(
       (data ?? []).map((n) => [
         n.id,
@@ -59,7 +60,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <FleetNotice />
+      <FleetNotice userId={user.id} />
 
       <ServerList initialServers={list} domain={serverDomain()} nodes={nodes} />
     </div>
@@ -70,7 +71,7 @@ export default async function DashboardPage() {
  * Servers need a node with the Howl.Host agent on it. Surfacing that up front
  * beats letting someone create a server that can never start.
  */
-async function FleetNotice() {
+async function FleetNotice({ userId }: { userId: string }) {
   if (!agentConfigured()) {
     return (
       <Alert tone="warn" title="No node connected">
@@ -84,7 +85,7 @@ async function FleetNotice() {
   let nodes: Node[] = [];
   try {
     const admin = createAdminClient();
-    const { data } = await admin.from("nodes").select("*");
+    const { data } = await admin.from("nodes").select("*").eq("owner_id", userId);
     nodes = (data as Node[] | null) ?? [];
   } catch {
     return null;
@@ -96,7 +97,7 @@ async function FleetNotice() {
       <Alert tone="warn" title="No node online">
         {nodes.length
           ? "Every registered node is offline. Servers will queue until one checks back in."
-          : "No node has registered yet. Follow DEPLOY.md to bring one up."}
+          : "Connect this account's host computer before starting a server."}
       </Alert>
     );
   }

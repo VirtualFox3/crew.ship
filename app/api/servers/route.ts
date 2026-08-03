@@ -46,7 +46,11 @@ export const POST = handler(async (request: Request) => {
   // The wizard greys these out, but a direct API call must not slip past.
   try {
     const admin = createAdminClient();
-    const { data: nodes } = await admin.from("nodes").select("arch").eq("status", "online");
+    const { data: nodes } = await admin
+      .from("nodes")
+      .select("arch")
+      .eq("owner_id", user.id)
+      .eq("status", "online");
     const arches = [...new Set((nodes ?? []).map((n) => n.arch as NodeArch))];
     if (arches.length && !arches.some((a) => runsOn(info, a))) {
       throw new ApiError(

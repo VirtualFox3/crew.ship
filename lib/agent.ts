@@ -25,27 +25,32 @@ export class AgentError extends Error {
   }
 }
 
-const agentSecret = () => requireEnv("AGENT_SHARED_SECRET");
+const masterSecret = () => requireEnv("AGENT_SHARED_SECRET");
 
-function sign(payload: string): string {
-  return createHmac("sha256", agentSecret()).update(payload).digest("base64url");
+/** A compromised host only reveals its own credential, never another user's. */
+export function nodeSecret(nodeId: string): string {
+  return createHmac("sha256", masterSecret()).update(`node:${nodeId}`).digest("base64url");
+}
+
+function sign(payload: string, secret: string): string {
+  return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
 /**
  * Short-lived capability token scoped to one server. Handed to the browser so
  * it can open the console WebSocket straight against the node.
  */
-export function issueConsoleToken(serverId: string, ttlSeconds = 900): string {
+export function issueConsoleToken(serverId: string, nodeId: string, ttlSeconds = 900): string {
   const payload = Buffer.from(
     JSON.stringify({ sid: serverId, exp: Math.floor(Date.now() / 1000) + ttlSeconds }),
   ).toString("base64url");
-  return `${payload}.${sign(payload)}`;
+  return `${payload}.${sign(payload, nodeSecret(nodeId))}`;
 }
 
 export function verifyConsoleToken(token: string): { sid: string } | null {
   const [payload, mac] = token.split(".");
   if (!payload || !mac) return null;
-  const expected = Buffer.from(sign(payload));
+  const expected = Buffer.from(sign(payload, masterSecret()));
   const given = Buffer.from(mac);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
   try {
@@ -68,7 +73,7 @@ interface AgentRequest {
 }
 
 export async function agentFetch<T>(
-  node: Pick<Node, "agent_url">,
+  node: Pick<Node, "id" | "agent_url">,
   path: string,
   { method = "GET", body, timeoutMs = 30_000 }: AgentRequest = {},
 ): Promise<T> {
@@ -81,7 +86,7 @@ export async function agentFetch<T>(
       method,
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${agentSecret()}`,
+        authorization: `Bearer ${nodeSecret(node.id)}`,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
