@@ -92,6 +92,7 @@ export async function queuePosition(
     .from("servers")
     .select("id", { count: "exact", head: true })
     .eq("status", "queued")
+    .eq("owner_id", server.owner_id)
     .lt("updated_at", server.updated_at);
 
   return (count ?? 0) + 1;
@@ -112,6 +113,19 @@ export async function startServer(
   admin: SupabaseClient,
   server: Server,
 ): Promise<StartResult> {
+  const { data: ownerNodes } = await admin
+    .from("nodes")
+    .select("id, status")
+    .eq("owner_id", server.owner_id);
+
+  if (!ownerNodes?.length) {
+    await admin
+      .from("servers")
+      .update({ status: "offline", status_detail: "Connect a host computer in Account before starting", queue_position: null })
+      .eq("id", server.id);
+    throw new ApiError("Connect your host computer from Account before starting this server.", 409);
+  }
+
   const placement = await place(admin, server);
 
   if (!placement) {
@@ -119,7 +133,9 @@ export async function startServer(
       .from("servers")
       .update({
         status: "queued",
-        status_detail: "Waiting for a free slot",
+        status_detail: ownerNodes.some((node) => node.status === "online")
+          ? "Waiting for free capacity on your computer"
+          : "Waiting for your host computer to come online",
         updated_at: new Date().toISOString(),
       })
       .eq("id", server.id);

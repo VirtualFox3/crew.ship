@@ -142,8 +142,9 @@ export function ServerHeader({
 
       {server.status === "queued" && (
         <Alert tone="info" title={`Queue position ${server.queue_position ?? "—"}`}>
-          Every node is full right now. Your server starts automatically the moment a
-          slot opens — the line is strictly first-come.
+          {server.status_detail === "Waiting for your host computer to come online"
+            ? "Your registered host computer is offline. Start its Howl.Host agent and this server will continue automatically."
+            : "Your computer has no free capacity right now. The server starts automatically when capacity becomes available."}
         </Alert>
       )}
 
