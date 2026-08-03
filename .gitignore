@@ -9,6 +9,9 @@ build/
 next-env.d.ts
 agent/node_modules/
 agent/data/
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
 .open-next/
 .wrangler/
 .dev.vars
