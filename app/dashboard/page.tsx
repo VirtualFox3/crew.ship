@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { Alert } from "@/components/ui";
 import { ServerList } from "@/components/server-list";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { agentConfigured } from "@/lib/agent";
 import { serverDomain } from "@/lib/env";
 import type { Node, Profile, Server } from "@/lib/types";
@@ -31,7 +30,7 @@ export default async function DashboardPage() {
   // than the one the server binds locally. Node rows are service-role only.
   let nodes: Record<string, NodeAddressInfo> = {};
   try {
-    const { data } = await createAdminClient()
+    const { data } = await supabase
       .from("nodes")
       .select("id, public_host, tunnel_host, tunnel_ports")
       .eq("owner_id", user.id);
@@ -84,8 +83,8 @@ async function FleetNotice({ userId }: { userId: string }) {
 
   let nodes: Node[] = [];
   try {
-    const admin = createAdminClient();
-    const { data } = await admin.from("nodes").select("*").eq("owner_id", userId);
+    const supabase = await createClient();
+    const { data } = await supabase.from("nodes").select("*").eq("owner_id", userId);
     nodes = (data as Node[] | null) ?? [];
   } catch {
     return null;

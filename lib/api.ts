@@ -117,7 +117,15 @@ export async function serverContext(
     );
   }
 
-  const admin = createAdminClient();
+  // Owner-scoped operations do not need a service-role key. RLS restricts the
+  // caller to their own servers and host computers, which is also what makes
+  // self-hosting work on a fresh deployment without privileged credentials.
+  let admin: SupabaseClient;
+  try {
+    admin = createAdminClient();
+  } catch {
+    admin = supabase;
+  }
   let node: Node | null = null;
   if (server.node_id) {
     const { data } = await admin.from("nodes").select("*").eq("id", server.node_id).maybeSingle();
