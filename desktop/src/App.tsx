@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 
 type View = "servers" | "new" | "settings";
+type Software = "vanilla" | "paper" | "fabric";
 
 type SystemStatus = {
   javaInstalled: boolean;
@@ -17,6 +18,7 @@ type InstalledServer = {
   id: string;
   name: string;
   jarPath: string;
+  software?: Software;
   gameVersion: string;
   loaderVersion: string;
   memoryMb: number;
@@ -42,6 +44,7 @@ function App() {
   const [view, setView] = useState<View>("servers");
   const [system, setSystem] = useState<SystemStatus>();
   const [versions, setVersions] = useState<string[]>([]);
+  const [selectedSoftware, setSelectedSoftware] = useState<Software>("paper");
   const [servers, setServers] = useState<InstalledServer[]>(savedServers);
   const [running, setRunning] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<string>();
@@ -76,10 +79,14 @@ function App() {
 
   useEffect(() => {
     void refreshSystem();
-    void invoke<string[]>("fabric_versions")
+  }, []);
+
+  useEffect(() => {
+    setVersions([]);
+    void invoke<string[]>("software_versions", { software: selectedSoftware })
       .then(setVersions)
       .catch((cause) => setError(errorMessage(cause)));
-  }, []);
+  }, [selectedSoftware]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(servers));
@@ -102,6 +109,7 @@ function App() {
     setNotice(undefined);
     const data = new FormData(event.currentTarget);
     const name = String(data.get("name") ?? "").trim();
+    const software = String(data.get("software") ?? "paper") as Software;
     const gameVersion = String(data.get("version") ?? "");
     const memoryMb = Number(data.get("memory"));
     const accepted = data.get("eula") === "on";
@@ -112,8 +120,9 @@ function App() {
 
     setBusy("install");
     try {
-      const installed = await invoke<Omit<InstalledServer, "name" | "memoryMb">>("install_fabric", {
+      const installed = await invoke<Omit<InstalledServer, "name" | "memoryMb">>("install_server", {
         id,
+        software,
         gameVersion,
       });
       setServers((current) => [...current, { ...installed, name, memoryMb }]);
@@ -205,13 +214,13 @@ function App() {
               <Metric value={String(servers.length)} label="INSTALLED" />
               <Metric value={String(Object.values(running).filter(Boolean).length)} label="RUNNING" accent />
               <Metric value={system?.javaInstalled ? "READY" : "MISSING"} label="JAVA" />
-              <Metric value={playitRunning ? "ACTIVE" : "OFF"} label="PLAYIT.GG" />
+              <Metric value={playitRunning ? "ACTIVE" : "BUILT IN"} label="PLAYIT.GG" />
             </div>
             {!servers.length ? <EmptyState onCreate={() => setView("new")} /> : <div className="server-list">
               {servers.map((server) => <article className="server-card" key={server.id}>
                 <div className="server-main">
                   <span className={`status-dot ${running[server.id] ? "online" : ""}`} />
-                  <div><h3>{server.name}</h3><p>Fabric {server.loaderVersion} · Minecraft {server.gameVersion} · {Math.round(server.memoryMb / 1024)} GB</p></div>
+                  <div><h3>{server.name}</h3><p>{softwareName(server.software ?? "fabric")} {server.loaderVersion} · Minecraft {server.gameVersion} · {Math.round(server.memoryMb / 1024)} GB</p></div>
                 </div>
                 <div className="server-actions">
                   <button className="ghost" onClick={() => setLogsFor(server.id)}>CONSOLE</button>
@@ -224,14 +233,15 @@ function App() {
           </>}
 
           {view === "new" && <>
-            <PageTitle title="Install a Fabric server" subtitle="Howl.Host downloads the real Fabric launcher for the Minecraft version you choose." />
+            <PageTitle title="Install a Minecraft server" subtitle="Choose the software and version. Howl.Host downloads the real upstream server automatically." />
             <form className="form-card" onSubmit={install}>
               <div className="step-number">01</div>
               <div className="form-grid">
                 <label><span>SERVER NAME</span><input name="name" required minLength={2} maxLength={40} placeholder="Friends SMP" /></label>
+                <label><span>SERVER SOFTWARE</span><select name="software" value={selectedSoftware} onChange={(event) => setSelectedSoftware(event.target.value as Software)}><option value="paper">Paper — plugins + performance</option><option value="fabric">Fabric — mods</option><option value="vanilla">Vanilla — official</option></select></label>
                 <label><span>MINECRAFT VERSION</span><select name="version" required disabled={!versions.length}>{versions.map((version) => <option key={version}>{version}</option>)}</select></label>
                 <label><span>MEMORY</span><select name="memory" defaultValue="4096"><option value="2048">2 GB</option><option value="4096">4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="12288">12 GB</option></select></label>
-                <div className="fact"><b>REAL FABRIC BUILDS</b><p>Versions come directly from Fabric’s official metadata service, not a hard-coded list.</p></div>
+                <div className="fact"><b>REAL UPSTREAM BUILDS</b><p>Versions come live from Mojang, PaperMC, or Fabric—not a hard-coded list.</p></div>
               </div>
               <label className="check"><input type="checkbox" name="eula" /><span>I accept the <button type="button" className="text-link" onClick={() => void openUrl("https://aka.ms/MinecraftEULA")}>Minecraft EULA</button>.</span></label>
               <div className="form-footer"><button type="button" className="ghost" onClick={() => setView("servers")}>CANCEL</button><button className="primary" disabled={busy === "install" || !versions.length}>{busy === "install" ? "DOWNLOADING…" : "INSTALL SERVER"}</button></div>
@@ -242,7 +252,7 @@ function App() {
             <PageTitle title="Host settings" subtitle="System checks and tunnel controls for this computer." />
             <div className="settings-grid">
               <section className="settings-card"><div className="card-heading"><span>JAVA RUNTIME</span><Pill ok={Boolean(system?.javaInstalled)} /></div><h3>{system?.javaInstalled ? "Ready" : "Java not found"}</h3><p>{system?.javaVersion ?? "Install Java 21 or newer to run recent Minecraft versions."}</p><button className="ghost" onClick={() => void openUrl("https://adoptium.net/temurin/releases/")}>GET JAVA ↗</button></section>
-              <section className="settings-card"><div className="card-heading"><span>PLAYIT.GG TUNNEL</span><Pill ok={playitRunning} /></div><h3>{playitRunning ? "Tunnel running" : system?.playitInstalled ? "Installed" : "Not detected"}</h3><p>{system?.playitPath ?? "Install playit.gg to share servers without port forwarding."}</p><div className="button-row"><button className="primary" disabled={busy === "playit" || !system?.playitInstalled} onClick={() => void togglePlayit()}>{playitRunning ? "STOP TUNNEL" : "START TUNNEL"}</button><button className="ghost" onClick={() => void openUrl("https://playit.gg/download")}>DOWNLOAD ↗</button></div></section>
+              <section className="settings-card"><div className="card-heading"><span>PLAYIT.GG TUNNEL</span><Pill ok={playitRunning} /></div><h3>{playitRunning ? "Tunnel running" : "Built into Howl.Host"}</h3><p>{system?.playitPath ?? "The official playit.gg agent downloads automatically the first time you start the tunnel."}</p><div className="button-row"><button className="primary" disabled={busy === "playit"} onClick={() => void togglePlayit()}>{busy === "playit" ? "PREPARING…" : playitRunning ? "STOP TUNNEL" : system?.playitInstalled ? "START TUNNEL" : "DOWNLOAD & START"}</button><button className="ghost" onClick={() => void openUrl("https://playit.gg")}>PLAYIT ACCOUNT ↗</button></div></section>
               <section className="settings-card wide"><div className="card-heading"><span>SERVER STORAGE</span><Pill ok /></div><h3>Owned by you</h3><p className="mono">{system?.dataDirectory ?? "Loading…"}</p><p>Worlds, mods, configs, and backups remain on this computer.</p></section>
             </div>
           </>}
@@ -271,7 +281,11 @@ function Pill({ ok }: { ok: boolean }) {
 }
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
-  return <div className="empty"><div className="empty-icon">▦</div><h2>No servers installed</h2><p>Create a real Fabric server on this computer. Your world never leaves the machine.</p><button className="primary" onClick={onCreate}>INSTALL YOUR FIRST SERVER</button></div>;
+  return <div className="empty"><div className="empty-icon">▦</div><h2>No servers installed</h2><p>Create a real Vanilla, Paper, or Fabric server on this computer. Your world never leaves the machine.</p><button className="primary" onClick={onCreate}>INSTALL YOUR FIRST SERVER</button></div>;
+}
+
+function softwareName(software: Software) {
+  return software === "paper" ? "Paper" : software === "vanilla" ? "Vanilla" : "Fabric";
 }
 
 export default App;

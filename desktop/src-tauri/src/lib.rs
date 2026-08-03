@@ -17,6 +17,9 @@ use std::os::windows::process::CommandExt;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const FABRIC_META: &str = "https://meta.fabricmc.net/v2";
+const MOJANG_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+const PAPER_API: &str = "https://fill.papermc.io/v3/projects/paper";
+const PLAYIT_WINDOWS: &str = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64-signed.exe";
 
 #[derive(Default)]
 struct HostState {
@@ -45,6 +48,7 @@ struct SystemStatus {
 struct InstalledServer {
     id: String,
     jar_path: String,
+    software: String,
     game_version: String,
     loader_version: String,
 }
@@ -83,6 +87,17 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
     Some(first.trim().to_owned())
 }
 
+fn http_get(url: impl AsRef<str>) -> Result<reqwest::blocking::Response, String> {
+    reqwest::blocking::Client::builder()
+        .user_agent("Howl.Host/0.2 (https://github.com/VirtualFox3/Pack.Host)")
+        .build()
+        .map_err(|error| format!("Could not create the download client: {error}"))?
+        .get(url.as_ref())
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| format!("Download request failed: {error}"))
+}
+
 fn find_playit() -> Option<PathBuf> {
     if let Some(found) = command_output("where.exe", &["playit.exe"]) {
         let path = PathBuf::from(found.lines().next()?.trim());
@@ -117,6 +132,33 @@ fn app_servers_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(servers)
 }
 
+fn bundled_playit_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let tools = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Could not locate the app data folder: {error}"))?
+        .join("tools");
+    fs::create_dir_all(&tools)
+        .map_err(|error| format!("Could not create the tools folder: {error}"))?;
+    Ok(tools.join("playit.exe"))
+}
+
+fn ensure_playit(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(path) = find_playit() {
+        return Ok(path);
+    }
+    let bundled = bundled_playit_path(app)?;
+    if bundled.is_file() {
+        return Ok(bundled);
+    }
+    let bytes = http_get(PLAYIT_WINDOWS)
+        .map_err(|error| format!("Could not download the official playit.gg agent: {error}"))?
+        .bytes()
+        .map_err(|error| format!("Could not read the playit.gg download: {error}"))?;
+    fs::write(&bundled, &bytes).map_err(|error| format!("Could not save playit.gg: {error}"))?;
+    Ok(bundled)
+}
+
 fn safe_id(value: &str) -> Result<&str, String> {
     if value.len() < 3
         || value.len() > 64
@@ -132,7 +174,8 @@ fn safe_id(value: &str) -> Result<&str, String> {
 #[tauri::command]
 fn system_status(app: AppHandle) -> Result<SystemStatus, String> {
     let java_version = command_output("java", &["-version"]);
-    let playit = find_playit();
+    let playit =
+        find_playit().or_else(|| bundled_playit_path(&app).ok().filter(|path| path.is_file()));
     let data_directory = app_servers_dir(&app)?.to_string_lossy().into_owned();
 
     Ok(SystemStatus {
@@ -145,25 +188,63 @@ fn system_status(app: AppHandle) -> Result<SystemStatus, String> {
 }
 
 #[tauri::command]
-fn fabric_versions() -> Result<Vec<String>, String> {
-    let versions: Vec<Value> = reqwest::blocking::get(format!("{FABRIC_META}/versions/game"))
-        .and_then(|response| response.error_for_status())
-        .map_err(|error| format!("Fabric's version service is unavailable: {error}"))?
+fn software_versions(software: String) -> Result<Vec<String>, String> {
+    let url = match software.as_str() {
+        "vanilla" => MOJANG_MANIFEST.to_owned(),
+        "paper" => PAPER_API.to_owned(),
+        "fabric" => format!("{FABRIC_META}/versions/game"),
+        _ => return Err("Choose Vanilla, Paper, or Fabric.".into()),
+    };
+    let data: Value = http_get(url)
+        .map_err(|error| format!("The version service is unavailable: {error}"))?
         .json()
-        .map_err(|error| format!("Fabric returned an invalid version list: {error}"))?;
+        .map_err(|error| format!("The version service returned invalid data: {error}"))?;
 
-    Ok(versions
-        .into_iter()
-        .filter(|item| item["stable"].as_bool().unwrap_or(false))
-        .filter_map(|item| item["version"].as_str().map(ToOwned::to_owned))
-        .take(60)
-        .collect())
+    let mut versions: Vec<String> = match software.as_str() {
+        "vanilla" => data["versions"]
+            .as_array()
+            .ok_or("Mojang returned no versions.")?
+            .iter()
+            .filter(|item| item["type"] == "release")
+            .filter_map(|item| item["id"].as_str().map(ToOwned::to_owned))
+            .collect(),
+        "paper" => data["versions"]
+            .as_object()
+            .ok_or("Paper returned no version groups.")?
+            .values()
+            .filter_map(Value::as_array)
+            .flatten()
+            .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+            .collect(),
+        "fabric" => data
+            .as_array()
+            .ok_or("Fabric returned no versions.")?
+            .iter()
+            .filter(|item| item["stable"].as_bool().unwrap_or(false))
+            .filter_map(|item| item["version"].as_str().map(ToOwned::to_owned))
+            .collect(),
+        _ => Vec::new(),
+    };
+    if software == "paper" {
+        versions.sort_by(|a, b| version_numbers(b).cmp(&version_numbers(a)));
+    }
+    versions.truncate(100);
+    Ok(versions)
+}
+
+fn version_numbers(version: &str) -> Vec<u32> {
+    version
+        .split(|character: char| !character.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse().unwrap_or(0))
+        .collect()
 }
 
 #[tauri::command]
-fn install_fabric(
+fn install_server(
     app: AppHandle,
     id: String,
+    software: String,
     game_version: String,
 ) -> Result<InstalledServer, String> {
     safe_id(&id)?;
@@ -174,44 +255,89 @@ fn install_fabric(
         return Err("Invalid Minecraft version.".into());
     }
 
-    let entries: Vec<Value> =
-        reqwest::blocking::get(format!("{FABRIC_META}/versions/loader/{game_version}"))
-            .and_then(|response| response.error_for_status())
-            .map_err(|error| format!("Fabric does not support that Minecraft version: {error}"))?
-            .json()
-            .map_err(|error| format!("Fabric returned invalid loader metadata: {error}"))?;
+    let (download_url, build_label) = match software.as_str() {
+        "fabric" => {
+            let entries: Vec<Value> =
+                http_get(format!("{FABRIC_META}/versions/loader/{game_version}"))
+                    .map_err(|error| format!("Fabric does not support that version: {error}"))?
+                    .json()
+                    .map_err(|error| format!("Fabric returned invalid metadata: {error}"))?;
+            let entry = entries
+                .first()
+                .ok_or_else(|| "No Fabric loader exists for that version.".to_owned())?;
+            let loader = entry["loader"]["version"]
+                .as_str()
+                .ok_or("Missing Fabric loader version.")?;
+            let installer = entry["installer"]["version"]
+                .as_str()
+                .ok_or("Missing Fabric installer version.")?;
+            (
+                format!(
+                    "{FABRIC_META}/versions/loader/{game_version}/{loader}/{installer}/server/jar"
+                ),
+                format!("Loader {loader}"),
+            )
+        }
+        "paper" => {
+            let builds: Vec<Value> =
+                http_get(format!("{PAPER_API}/versions/{game_version}/builds"))
+                    .map_err(|error| format!("Paper does not support that version: {error}"))?
+                    .json()
+                    .map_err(|error| format!("Paper returned invalid build data: {error}"))?;
+            let build = builds
+                .iter()
+                .find(|item| item["channel"] == "STABLE")
+                .or_else(|| builds.first())
+                .ok_or_else(|| "Paper has no build for that version.".to_owned())?;
+            let build_id = build["id"]
+                .as_u64()
+                .ok_or("Paper build number is missing.")?;
+            let url = build["downloads"]["server:default"]["url"]
+                .as_str()
+                .ok_or("Paper download URL is missing.")?;
+            (url.to_owned(), format!("Build {build_id}"))
+        }
+        "vanilla" => {
+            let manifest: Value = http_get(MOJANG_MANIFEST)
+                .map_err(|error| format!("Could not load Mojang versions: {error}"))?
+                .json()
+                .map_err(|error| format!("Mojang returned invalid metadata: {error}"))?;
+            let metadata_url = manifest["versions"]
+                .as_array()
+                .and_then(|items| items.iter().find(|item| item["id"] == game_version))
+                .and_then(|item| item["url"].as_str())
+                .ok_or("That official Minecraft version was not found.")?;
+            let metadata: Value = http_get(metadata_url)
+                .map_err(|error| format!("Could not load Mojang download data: {error}"))?
+                .json()
+                .map_err(|error| format!("Mojang returned invalid download data: {error}"))?;
+            let url = metadata["downloads"]["server"]["url"]
+                .as_str()
+                .ok_or("Mojang does not publish a server for that version.")?;
+            (url.to_owned(), "Official".to_owned())
+        }
+        _ => return Err("Choose Vanilla, Paper, or Fabric.".into()),
+    };
 
-    let entry = entries
-        .first()
-        .ok_or_else(|| "No Fabric loader exists for that Minecraft version.".to_owned())?;
-    let loader = entry["loader"]["version"]
-        .as_str()
-        .ok_or_else(|| "Fabric metadata did not include a loader version.".to_owned())?;
-    let installer = entry["installer"]["version"]
-        .as_str()
-        .ok_or_else(|| "Fabric metadata did not include an installer version.".to_owned())?;
-
-    let bytes = reqwest::blocking::get(format!(
-        "{FABRIC_META}/versions/loader/{game_version}/{loader}/{installer}/server/jar"
-    ))
-    .and_then(|response| response.error_for_status())
-    .map_err(|error| format!("Could not download Fabric: {error}"))?
-    .bytes()
-    .map_err(|error| format!("Could not read the Fabric download: {error}"))?;
+    let bytes = http_get(download_url)
+        .map_err(|error| format!("Could not download the server: {error}"))?
+        .bytes()
+        .map_err(|error| format!("Could not read the server download: {error}"))?;
 
     let directory = app_servers_dir(&app)?.join(&id);
     fs::create_dir_all(&directory)
         .map_err(|error| format!("Could not create the server directory: {error}"))?;
-    let jar = directory.join("fabric-server-launch.jar");
-    fs::write(&jar, &bytes).map_err(|error| format!("Could not save Fabric: {error}"))?;
+    let jar = directory.join("server.jar");
+    fs::write(&jar, &bytes).map_err(|error| format!("Could not save the server: {error}"))?;
     fs::write(directory.join("eula.txt"), "eula=true\n")
         .map_err(|error| format!("Could not accept the Minecraft EULA: {error}"))?;
 
     Ok(InstalledServer {
         id,
         jar_path: jar.to_string_lossy().into_owned(),
+        software,
         game_version,
-        loader_version: loader.to_owned(),
+        loader_version: build_label,
     })
 }
 
@@ -240,7 +366,7 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
 
     let jar = Path::new(&config.jar_path)
         .canonicalize()
-        .map_err(|_| "The Fabric server file is missing. Reinstall this server.".to_owned())?;
+        .map_err(|_| "The server file is missing. Reinstall this server.".to_owned())?;
     let directory = jar
         .parent()
         .ok_or_else(|| "The server folder is invalid.".to_owned())?;
@@ -280,7 +406,7 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
     })?;
     let stdin = child.stdin.take();
     let logs = Arc::new(Mutex::new(VecDeque::from([
-        "[Howl.Host] Starting Fabric in the background…".to_owned(),
+        "[Howl.Host] Starting Minecraft in the background…".to_owned(),
     ])));
     if let Some(stdout) = child.stdout.take() {
         read_log_stream(stdout, Arc::clone(&logs));
@@ -357,14 +483,17 @@ fn stop_server(id: String, state: State<'_, HostState>) -> Result<ProcessStatus,
 }
 
 #[tauri::command]
-fn start_playit(path: Option<String>, state: State<'_, HostState>) -> Result<bool, String> {
+fn start_playit(
+    app: AppHandle,
+    path: Option<String>,
+    state: State<'_, HostState>,
+) -> Result<bool, String> {
     let executable = path
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
         .or_else(find_playit)
-        .ok_or_else(|| {
-            "playit.gg was not found. Install it, then choose its executable.".to_owned()
-        })?;
+        .map(Ok)
+        .unwrap_or_else(|| ensure_playit(&app))?;
     if !executable.is_file() {
         return Err("The selected playit.gg executable does not exist.".into());
     }
@@ -413,8 +542,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             system_status,
-            fabric_versions,
-            install_fabric,
+            software_versions,
+            install_server,
             start_server,
             stop_server,
             server_status,

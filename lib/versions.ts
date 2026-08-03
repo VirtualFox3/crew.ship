@@ -23,7 +23,7 @@ async function getJson<T>(url: string, revalidate = HOUR): Promise<T | null> {
   try {
     const res = await fetch(url, {
       next: { revalidate },
-      headers: { "user-agent": "Howl.Host/1.0 (+https://howl.host)" },
+      headers: { "user-agent": "Howl.Host/1.0 (https://github.com/VirtualFox3/Pack.Host)" },
     });
     if (!res.ok) return null;
     return (await res.json()) as T;
@@ -57,11 +57,12 @@ async function mojangVersions(): Promise<VersionOption[]> {
 }
 
 async function paperProjectVersions(project: string): Promise<VersionOption[]> {
-  const data = await getJson<{ versions: string[] }>(
-    `https://api.papermc.io/v2/projects/${project}`,
+  const data = await getJson<{ versions: Record<string, string[]> }>(
+    `https://fill.papermc.io/v3/projects/${project}`,
   );
-  if (!data?.versions?.length) return plain(FALLBACK);
-  return plain([...data.versions].reverse()).map((v) => ({
+  const versions = data?.versions ? Object.values(data.versions).flat() : [];
+  if (!versions.length) return plain(FALLBACK);
+  return plain(versions.sort(compareVersionsDesc)).map((v) => ({
     ...v,
     unstable: /pre|rc|snapshot|w\d\d[a-z]/i.test(v.id),
   }));
