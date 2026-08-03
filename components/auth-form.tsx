@@ -71,11 +71,11 @@ export function AuthForm({ mode }: { mode: Mode }) {
     }
   }
 
-  async function withDiscord() {
+  async function withOAuth(provider: "discord" | "google") {
     setError(null);
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: "discord",
+      provider,
       options: {
         redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
       },
@@ -94,7 +94,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
             <Server className="size-5" strokeWidth={2.5} />
           </span>
           <span className="text-lg font-semibold tracking-tight">
-            Pack<span className="text-grass-400">.Host</span>
+            Howl<span className="text-grass-400">.Host</span>
           </span>
         </Link>
 
@@ -164,9 +164,24 @@ export function AuthForm({ mode }: { mode: Mode }) {
             <span className="h-px flex-1 bg-ink-700" />
           </div>
 
-          <Button variant="outline" className="w-full" onClick={withDiscord} type="button">
-            Continue with Discord
-          </Button>
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => withOAuth("discord")}
+              type="button"
+            >
+              Continue with Discord
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => withOAuth("google")}
+              type="button"
+            >
+              Continue with Google
+            </Button>
+          </div>
 
           <p className="mt-6 text-center text-sm text-ink-400">
             {signup ? "Already have an account? " : "New here? "}
