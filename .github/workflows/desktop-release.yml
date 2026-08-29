@@ -31,6 +31,13 @@ jobs:
         with:
           workspaces: desktop/src-tauri
       - run: npm ci
+      - name: Bundle the official signed playit.gg agent
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri/resources | Out-Null
+          Invoke-WebRequest "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64-signed.exe" -OutFile "src-tauri/resources/playit.exe"
+          $signature = Get-AuthenticodeSignature "src-tauri/resources/playit.exe"
+          if ($signature.Status -ne "Valid") { throw "The downloaded playit.gg agent does not have a valid Authenticode signature." }
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

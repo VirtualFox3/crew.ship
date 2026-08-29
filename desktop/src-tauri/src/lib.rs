@@ -19,6 +19,11 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const FABRIC_META: &str = "https://meta.fabricmc.net/v2";
 const MOJANG_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const PAPER_API: &str = "https://fill.papermc.io/v3/projects/paper";
+const PURPUR_API: &str = "https://api.purpurmc.org/v2/purpur";
+const FORGE_METADATA: &str =
+    "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml";
+const NEOFORGE_METADATA: &str =
+    "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
 const PLAYIT_WINDOWS: &str = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64-signed.exe";
 
 #[derive(Default)]
@@ -61,6 +66,7 @@ struct StartConfig {
     id: String,
     jar_path: String,
     memory_mb: u32,
+    software: String,
 }
 
 #[derive(Serialize)]
@@ -68,6 +74,51 @@ struct StartConfig {
 struct ProcessStatus {
     running: bool,
     exit_code: Option<i32>,
+}
+
+#[derive(Deserialize)]
+struct ModrinthSearchResponse {
+    hits: Vec<ModrinthHit>,
+}
+
+#[derive(Deserialize)]
+struct ModrinthHit {
+    project_id: String,
+    title: String,
+    description: String,
+    icon_url: Option<String>,
+    downloads: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddonResult {
+    id: String,
+    title: String,
+    description: String,
+    icon_url: Option<String>,
+    downloads: u64,
+}
+
+#[derive(Deserialize)]
+struct ModrinthVersion {
+    name: String,
+    files: Vec<ModrinthFile>,
+}
+
+#[derive(Deserialize)]
+struct ModrinthFile {
+    url: String,
+    filename: String,
+    primary: Option<bool>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InstalledAddon {
+    name: String,
+    filename: String,
+    directory: String,
 }
 
 fn hidden(command: &mut Command) -> &mut Command {
@@ -138,7 +189,11 @@ fn local_address() -> Option<String> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
     let address = socket.local_addr().ok()?.ip();
-    if address.is_loopback() { None } else { Some(format!("{address}:25565")) }
+    if address.is_loopback() {
+        None
+    } else {
+        Some(format!("{address}:25565"))
+    }
 }
 
 fn bundled_playit_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -159,6 +214,15 @@ fn ensure_playit(app: &AppHandle) -> Result<PathBuf, String> {
     let bundled = bundled_playit_path(app)?;
     if bundled.is_file() {
         return Ok(bundled);
+    }
+    if let Ok(resource_root) = app.path().resource_dir() {
+        let packaged = resource_root.join("resources").join("playit.exe");
+        if packaged.is_file() {
+            fs::copy(&packaged, &bundled).map_err(|error| {
+                format!("Could not prepare the bundled playit.gg agent: {error}")
+            })?;
+            return Ok(bundled);
+        }
     }
     let bytes = http_get(PLAYIT_WINDOWS)
         .map_err(|error| format!("Could not download the official playit.gg agent: {error}"))?
@@ -221,11 +285,37 @@ fn system_status(app: AppHandle) -> Result<SystemStatus, String> {
 
 #[tauri::command]
 fn software_versions(software: String) -> Result<Vec<String>, String> {
+    if matches!(software.as_str(), "forge" | "neoforge") {
+        let metadata = if software == "forge" {
+            FORGE_METADATA
+        } else {
+            NEOFORGE_METADATA
+        };
+        let xml = http_get(metadata)
+            .map_err(|error| format!("The loader version service is unavailable: {error}"))?
+            .text()
+            .map_err(|error| format!("Could not read loader versions: {error}"))?;
+        let mut versions: Vec<String> = xml_versions(&xml)
+            .into_iter()
+            .filter_map(|loader| {
+                if software == "forge" {
+                    loader.rsplit_once('-').map(|(game, _)| game.to_owned())
+                } else {
+                    neoforge_game_version(&loader)
+                }
+            })
+            .collect();
+        versions.sort_by_key(|version| std::cmp::Reverse(version_numbers(version)));
+        versions.dedup();
+        versions.truncate(100);
+        return Ok(versions);
+    }
     let url = match software.as_str() {
         "vanilla" => MOJANG_MANIFEST.to_owned(),
         "paper" => PAPER_API.to_owned(),
+        "purpur" => PURPUR_API.to_owned(),
         "fabric" => format!("{FABRIC_META}/versions/game"),
-        _ => return Err("Choose Vanilla, Paper, or Fabric.".into()),
+        _ => return Err("Choose a supported server platform.".into()),
     };
     let data: Value = http_get(url)
         .map_err(|error| format!("The version service is unavailable: {error}"))?
@@ -248,6 +338,12 @@ fn software_versions(software: String) -> Result<Vec<String>, String> {
             .flatten()
             .filter_map(|item| item.as_str().map(ToOwned::to_owned))
             .collect(),
+        "purpur" => data["versions"]
+            .as_array()
+            .ok_or("Purpur returned no versions.")?
+            .iter()
+            .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+            .collect(),
         "fabric" => data
             .as_array()
             .ok_or("Fabric returned no versions.")?
@@ -257,8 +353,8 @@ fn software_versions(software: String) -> Result<Vec<String>, String> {
             .collect(),
         _ => Vec::new(),
     };
-    if software == "paper" {
-        versions.sort_by(|a, b| version_numbers(b).cmp(&version_numbers(a)));
+    if matches!(software.as_str(), "paper" | "purpur") {
+        versions.sort_by_key(|version| std::cmp::Reverse(version_numbers(version)));
     }
     versions.truncate(100);
     Ok(versions)
@@ -270,6 +366,27 @@ fn version_numbers(version: &str) -> Vec<u32> {
         .filter(|part| !part.is_empty())
         .map(|part| part.parse().unwrap_or(0))
         .collect()
+}
+
+fn xml_versions(xml: &str) -> Vec<String> {
+    xml.split("<version>")
+        .skip(1)
+        .filter_map(|part| part.split("</version>").next())
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn neoforge_game_version(loader: &str) -> Option<String> {
+    let mut parts = loader.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    Some(if major >= 26 {
+        format!("{major}.{minor}")
+    } else {
+        format!("1.{major}.{minor}")
+    })
 }
 
 #[tauri::command]
@@ -288,7 +405,7 @@ fn install_server(
         return Err("Invalid Minecraft version.".into());
     }
 
-    let (download_url, build_label) = match software.as_str() {
+    let (download_url, build_label, needs_installer) = match software.as_str() {
         "fabric" => {
             let entries: Vec<Value> =
                 http_get(format!("{FABRIC_META}/versions/loader/{game_version}"))
@@ -309,6 +426,7 @@ fn install_server(
                     "{FABRIC_META}/versions/loader/{game_version}/{loader}/{installer}/server/jar"
                 ),
                 format!("Loader {loader}"),
+                false,
             )
         }
         "paper" => {
@@ -328,7 +446,53 @@ fn install_server(
             let url = build["downloads"]["server:default"]["url"]
                 .as_str()
                 .ok_or("Paper download URL is missing.")?;
-            (url.to_owned(), format!("Build {build_id}"))
+            (url.to_owned(), format!("Build {build_id}"), false)
+        }
+        "purpur" => {
+            let data: Value = http_get(format!("{PURPUR_API}/{game_version}"))
+                .map_err(|error| format!("Purpur does not support that version: {error}"))?
+                .json()
+                .map_err(|error| format!("Purpur returned invalid build data: {error}"))?;
+            let build = match &data["builds"]["latest"] {
+                Value::String(value) => value.clone(),
+                Value::Number(value) => value.to_string(),
+                _ => return Err("Purpur returned no latest build.".into()),
+            };
+            (
+                format!("{PURPUR_API}/{game_version}/{build}/download"),
+                format!("Build {build}"),
+                false,
+            )
+        }
+        "forge" | "neoforge" => {
+            let metadata_url = if software == "forge" {
+                FORGE_METADATA
+            } else {
+                NEOFORGE_METADATA
+            };
+            let xml = http_get(metadata_url)
+                .map_err(|error| format!("Could not load {software} releases: {error}"))?
+                .text()
+                .map_err(|error| format!("Could not read {software} releases: {error}"))?;
+            let loader = xml_versions(&xml)
+                .into_iter()
+                .filter(|version| {
+                    if software == "forge" {
+                        version.starts_with(&format!("{game_version}-"))
+                    } else {
+                        neoforge_game_version(version).as_deref() == Some(game_version.as_str())
+                    }
+                })
+                .max_by(|a, b| version_numbers(a).cmp(&version_numbers(b)))
+                .ok_or_else(|| {
+                    format!("No {software} installer exists for Minecraft {game_version}.")
+                })?;
+            let url = if software == "forge" {
+                format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{loader}/forge-{loader}-installer.jar")
+            } else {
+                format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{loader}/neoforge-{loader}-installer.jar")
+            };
+            (url, format!("Loader {loader}"), true)
         }
         "vanilla" => {
             let manifest: Value = http_get(MOJANG_MANIFEST)
@@ -347,9 +511,9 @@ fn install_server(
             let url = metadata["downloads"]["server"]["url"]
                 .as_str()
                 .ok_or("Mojang does not publish a server for that version.")?;
-            (url.to_owned(), "Official".to_owned())
+            (url.to_owned(), "Official".to_owned(), false)
         }
-        _ => return Err("Choose Vanilla, Paper, or Fabric.".into()),
+        _ => return Err("Choose a supported server platform.".into()),
     };
 
     let bytes = http_get(download_url)
@@ -360,8 +524,39 @@ fn install_server(
     let directory = app_servers_dir(&app)?.join(&id);
     fs::create_dir_all(&directory)
         .map_err(|error| format!("Could not create the server directory: {error}"))?;
-    let jar = directory.join("server.jar");
-    fs::write(&jar, &bytes).map_err(|error| format!("Could not save the server: {error}"))?;
+    let download_path = directory.join(if needs_installer {
+        "installer.jar"
+    } else {
+        "server.jar"
+    });
+    fs::write(&download_path, &bytes)
+        .map_err(|error| format!("Could not save the server: {error}"))?;
+    let launch_path = if needs_installer {
+        let mut installer = Command::new("java");
+        hidden(&mut installer);
+        let status = installer
+            .current_dir(&directory)
+            .args(["-jar", "installer.jar", "--installServer"])
+            .status()
+            .map_err(|error| format!("Could not run the {software} installer: {error}"))?;
+        if !status.success() {
+            return Err(format!("The {software} installer exited with {status}."));
+        }
+        let script = if cfg!(windows) {
+            directory.join("run.bat")
+        } else {
+            directory.join("run.sh")
+        };
+        if !script.is_file() {
+            return Err(format!(
+                "The {software} installer did not create its launch script."
+            ));
+        }
+        let _ = fs::remove_file(&download_path);
+        script
+    } else {
+        download_path
+    };
     fs::write(directory.join("eula.txt"), "eula=true\n")
         .map_err(|error| format!("Could not accept the Minecraft EULA: {error}"))?;
     set_server_property(
@@ -372,7 +567,7 @@ fn install_server(
 
     Ok(InstalledServer {
         id,
-        jar_path: jar.to_string_lossy().into_owned(),
+        jar_path: launch_path.to_string_lossy().into_owned(),
         software,
         game_version,
         loader_version: build_label,
@@ -414,10 +609,10 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         return Err("Memory must be between 1024 MB and 65536 MB.".into());
     }
 
-    let jar = Path::new(&config.jar_path)
+    let launch_path = Path::new(&config.jar_path)
         .canonicalize()
         .map_err(|_| "The server file is missing. Reinstall this server.".to_owned())?;
-    let directory = jar
+    let directory = launch_path
         .parent()
         .ok_or_else(|| "The server folder is invalid.".to_owned())?;
     // Crew.Ship defaults to compatible login mode so both premium and offline
@@ -443,13 +638,39 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         servers.remove(&config.id);
     }
 
-    let mut command = Command::new("java");
+    let installer_platform = matches!(config.software.as_str(), "forge" | "neoforge");
+    let mut command = if installer_platform {
+        fs::write(
+            directory.join("user_jvm_args.txt"),
+            format!(
+                "-Xms{}M\n-Xmx{}M\n",
+                config.memory_mb.min(1_024),
+                config.memory_mb
+            ),
+        )
+        .map_err(|error| format!("Could not configure server memory: {error}"))?;
+        #[cfg(windows)]
+        {
+            let mut script = Command::new("cmd.exe");
+            script.args(["/D", "/C", launch_path.to_string_lossy().as_ref(), "nogui"]);
+            script
+        }
+        #[cfg(not(windows))]
+        {
+            let mut script = Command::new("sh");
+            script.args([launch_path.to_string_lossy().as_ref(), "nogui"]);
+            script
+        }
+    } else {
+        let mut java = Command::new("java");
+        java.arg(format!("-Xms{}M", config.memory_mb.min(1_024)))
+            .arg(format!("-Xmx{}M", config.memory_mb))
+            .args(["-jar", launch_path.to_string_lossy().as_ref(), "nogui"]);
+        java
+    };
     hidden(&mut command);
     command
         .current_dir(directory)
-        .arg(format!("-Xms{}M", config.memory_mb.min(1_024)))
-        .arg(format!("-Xmx{}M", config.memory_mb))
-        .args(["-jar", jar.to_string_lossy().as_ref(), "nogui"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -482,6 +703,122 @@ fn server_mods_directory(app: AppHandle, id: String) -> Result<String, String> {
     fs::create_dir_all(&directory)
         .map_err(|error| format!("Could not create the mods folder: {error}"))?;
     Ok(directory.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn search_modrinth(query: String, kind: String) -> Result<Vec<AddonResult>, String> {
+    let project_type = match kind.as_str() {
+        "mod" => "mod",
+        "plugin" => "plugin",
+        _ => return Err("Choose mods or plugins.".into()),
+    };
+    let facets = serde_json::to_string(&vec![vec![format!("project_type:{project_type}")]])
+        .map_err(|error| error.to_string())?;
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Crew.Ship/0.4 (https://github.com/VirtualFox3/Pack.Host)")
+        .build()
+        .map_err(|error| format!("Could not create the catalog client: {error}"))?;
+    let response: ModrinthSearchResponse = client
+        .get("https://api.modrinth.com/v2/search")
+        .query(&[
+            ("query", query.as_str()),
+            ("facets", facets.as_str()),
+            ("limit", "24"),
+        ])
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| format!("Modrinth search failed: {error}"))?
+        .json()
+        .map_err(|error| format!("Modrinth returned an invalid response: {error}"))?;
+    Ok(response
+        .hits
+        .into_iter()
+        .map(|hit| AddonResult {
+            id: hit.project_id,
+            title: hit.title,
+            description: hit.description,
+            icon_url: hit.icon_url,
+            downloads: hit.downloads,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn install_modrinth_addon(
+    app: AppHandle,
+    server_id: String,
+    project_id: String,
+    kind: String,
+    game_version: String,
+    loader: String,
+) -> Result<InstalledAddon, String> {
+    let server_id = safe_id(&server_id)?;
+    let directory_name = match kind.as_str() {
+        "mod" if matches!(loader.as_str(), "fabric" | "forge" | "neoforge") => "mods",
+        "plugin" if matches!(loader.as_str(), "paper" | "purpur") => "plugins",
+        "mod" => return Err("Mods require Fabric, Forge, or NeoForge.".into()),
+        "plugin" => return Err("Plugins require Paper or Purpur.".into()),
+        _ => return Err("Choose mods or plugins.".into()),
+    };
+    if project_id.is_empty()
+        || !project_id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        return Err("Invalid Modrinth project identifier.".into());
+    }
+    let loader_filters = if loader == "purpur" {
+        vec!["purpur", "paper"]
+    } else {
+        vec![loader.as_str()]
+    };
+    let loaders = serde_json::to_string(&loader_filters).map_err(|error| error.to_string())?;
+    let game_versions =
+        serde_json::to_string(&vec![game_version]).map_err(|error| error.to_string())?;
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Crew.Ship/0.4 (https://github.com/VirtualFox3/Pack.Host)")
+        .build()
+        .map_err(|error| format!("Could not create the catalog client: {error}"))?;
+    let versions: Vec<ModrinthVersion> = client
+        .get(format!(
+            "https://api.modrinth.com/v2/project/{project_id}/version"
+        ))
+        .query(&[
+            ("loaders", loaders.as_str()),
+            ("game_versions", game_versions.as_str()),
+        ])
+        .send()
+        .and_then(|response| response.error_for_status())
+        .map_err(|error| format!("Could not resolve a compatible Modrinth release: {error}"))?
+        .json()
+        .map_err(|error| format!("Modrinth returned an invalid release: {error}"))?;
+    let version = versions.into_iter().next().ok_or_else(|| {
+        "No compatible release exists for this server version and loader.".to_string()
+    })?;
+    let file = version
+        .files
+        .iter()
+        .find(|file| file.primary.unwrap_or(false))
+        .or_else(|| version.files.first())
+        .ok_or_else(|| "The selected release has no downloadable file.".to_string())?;
+    let safe_filename = Path::new(&file.filename)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| name.ends_with(".jar"))
+        .ok_or_else(|| "Modrinth returned an unsafe or unsupported filename.".to_string())?;
+    let directory = app_servers_dir(&app)?.join(server_id).join(directory_name);
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Could not create the add-on directory: {error}"))?;
+    let bytes = http_get(&file.url)?
+        .bytes()
+        .map_err(|error| format!("Could not download the add-on: {error}"))?;
+    fs::write(directory.join(safe_filename), &bytes)
+        .map_err(|error| format!("Could not install the add-on: {error}"))?;
+    Ok(InstalledAddon {
+        name: version.name,
+        filename: safe_filename.to_owned(),
+        directory: directory.to_string_lossy().into_owned(),
+    })
 }
 
 #[tauri::command]
@@ -612,6 +949,8 @@ pub fn run() {
             server_status,
             server_logs,
             server_mods_directory,
+            search_modrinth,
+            install_modrinth_addon,
             start_playit,
             stop_playit
         ])
