@@ -22,6 +22,7 @@ type InstalledServer = {
   gameVersion: string;
   loaderVersion: string;
   memoryMb: number;
+  offlineMode?: boolean;
 };
 
 type ProcessStatus = { running: boolean; exitCode?: number };
@@ -112,6 +113,7 @@ function App() {
     const software = String(data.get("software") ?? "paper") as Software;
     const gameVersion = String(data.get("version") ?? "");
     const memoryMb = Number(data.get("memory"));
+    const offlineMode = data.get("offlineMode") === "on";
     const accepted = data.get("eula") === "on";
     if (!accepted) return setError("Accept the Minecraft EULA before installing.");
     let id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -124,6 +126,7 @@ function App() {
         id,
         software,
         gameVersion,
+        offlineMode,
       });
       setServers((current) => [...current, { ...installed, name, memoryMb }]);
       setNotice(`${name} is installed and ready.`);
@@ -158,6 +161,21 @@ function App() {
       await invoke("stop_server", { id: server.id });
       setRunning((current) => ({ ...current, [server.id]: false }));
       setNotice(`${server.name} saved and stopped.`);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function toggleOfflineMode(server: InstalledServer) {
+    const offlineMode = !server.offlineMode;
+    setBusy(`mode-${server.id}`);
+    setError(undefined);
+    try {
+      await invoke("set_offline_mode", { id: server.id, offlineMode });
+      setServers((current) => current.map((item) => item.id === server.id ? { ...item, offlineMode } : item));
+      setNotice(`${server.name} is now in ${offlineMode ? "offline" : "online"} mode. Restart it to apply the change.`);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -220,9 +238,10 @@ function App() {
               {servers.map((server) => <article className="server-card" key={server.id}>
                 <div className="server-main">
                   <span className={`status-dot ${running[server.id] ? "online" : ""}`} />
-                  <div><h3>{server.name}</h3><p>{softwareName(server.software ?? "fabric")} {server.loaderVersion} · Minecraft {server.gameVersion} · {Math.round(server.memoryMb / 1024)} GB</p></div>
+                  <div><h3>{server.name}</h3><p>{softwareName(server.software ?? "fabric")} {server.loaderVersion} · Minecraft {server.gameVersion} · {Math.round(server.memoryMb / 1024)} GB · {server.offlineMode ? "Offline mode" : "Account verified"}</p></div>
                 </div>
                 <div className="server-actions">
+                  <button className="ghost" disabled={busy === `mode-${server.id}`} onClick={() => void toggleOfflineMode(server)}>{busy === `mode-${server.id}` ? "UPDATING…" : server.offlineMode ? "OFFLINE" : "ONLINE"}</button>
                   <button className="ghost" onClick={() => setLogsFor(server.id)}>CONSOLE</button>
                   <button className={running[server.id] ? "danger-button" : "primary"} disabled={busy === server.id || !system?.javaInstalled} onClick={() => void (running[server.id] ? stop(server) : start(server))}>
                     {busy === server.id ? "WORKING…" : running[server.id] ? "■ STOP" : "▶ START"}
@@ -242,6 +261,7 @@ function App() {
                 <label><span>MINECRAFT VERSION</span><select name="version" required disabled={!versions.length}>{versions.map((version) => <option key={version}>{version}</option>)}</select></label>
                 <label><span>MEMORY</span><select name="memory" defaultValue="4096"><option value="2048">2 GB</option><option value="4096">4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="12288">12 GB</option></select></label>
                 <div className="fact"><b>REAL UPSTREAM BUILDS</b><p>Versions come live from Mojang, PaperMC, or Fabric—not a hard-coded list.</p></div>
+                <label className="offline-check"><input type="checkbox" name="offlineMode" /><span><b>OFFLINE MODE</b><small>Allow unverified client accounts. Anyone can pick another player name, so use a whitelist or an authentication plugin.</small></span></label>
               </div>
               <label className="check"><input type="checkbox" name="eula" /><span>I accept the <button type="button" className="text-link" onClick={() => void openUrl("https://aka.ms/MinecraftEULA")}>Minecraft EULA</button>.</span></label>
               <div className="form-footer"><button type="button" className="ghost" onClick={() => setView("servers")}>CANCEL</button><button className="primary" disabled={busy === "install" || !versions.length}>{busy === "install" ? "DOWNLOADING…" : "INSTALL SERVER"}</button></div>

@@ -51,6 +51,7 @@ struct InstalledServer {
     software: String,
     game_version: String,
     loader_version: String,
+    offline_mode: bool,
 }
 
 #[derive(Deserialize)]
@@ -171,6 +172,28 @@ fn safe_id(value: &str) -> Result<&str, String> {
     Ok(value)
 }
 
+fn set_server_property(path: &Path, key: &str, value: &str) -> Result<(), String> {
+    let original = fs::read_to_string(path).unwrap_or_default();
+    let prefix = format!("{key}=");
+    let mut found = false;
+    let mut lines: Vec<String> = original
+        .lines()
+        .map(|line| {
+            if line.starts_with(&prefix) {
+                found = true;
+                format!("{prefix}{value}")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect();
+    if !found {
+        lines.push(format!("{prefix}{value}"));
+    }
+    fs::write(path, format!("{}\n", lines.join("\n")))
+        .map_err(|error| format!("Could not update server.properties: {error}"))
+}
+
 #[tauri::command]
 fn system_status(app: AppHandle) -> Result<SystemStatus, String> {
     let java_version = command_output("java", &["-version"]);
@@ -246,6 +269,7 @@ fn install_server(
     id: String,
     software: String,
     game_version: String,
+    offline_mode: bool,
 ) -> Result<InstalledServer, String> {
     safe_id(&id)?;
     if !game_version
@@ -331,6 +355,11 @@ fn install_server(
     fs::write(&jar, &bytes).map_err(|error| format!("Could not save the server: {error}"))?;
     fs::write(directory.join("eula.txt"), "eula=true\n")
         .map_err(|error| format!("Could not accept the Minecraft EULA: {error}"))?;
+    set_server_property(
+        &directory.join("server.properties"),
+        "online-mode",
+        if offline_mode { "false" } else { "true" },
+    )?;
 
     Ok(InstalledServer {
         id,
@@ -338,7 +367,19 @@ fn install_server(
         software,
         game_version,
         loader_version: build_label,
+        offline_mode,
     })
+}
+
+#[tauri::command]
+fn set_offline_mode(app: AppHandle, id: String, offline_mode: bool) -> Result<(), String> {
+    safe_id(&id)?;
+    let properties = app_servers_dir(&app)?.join(&id).join("server.properties");
+    set_server_property(
+        &properties,
+        "online-mode",
+        if offline_mode { "false" } else { "true" },
+    )
 }
 
 fn read_log_stream<R: std::io::Read + Send + 'static>(
@@ -544,6 +585,7 @@ pub fn run() {
             system_status,
             software_versions,
             install_server,
+            set_offline_mode,
             start_server,
             stop_server,
             server_status,
