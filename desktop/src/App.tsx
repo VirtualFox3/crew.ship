@@ -4,7 +4,7 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 
 type View = "servers" | "new" | "settings";
-type Theme = "dark" | "light";
+type Theme = "graphite" | "midnight" | "light";
 type Software = "vanilla" | "paper" | "fabric";
 
 type SystemStatus = {
@@ -59,7 +59,10 @@ function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [playitRunning, setPlayitRunning] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(() => localStorage.getItem(WELCOME_KEY) !== "true");
-  const [theme, setTheme] = useState<Theme>(() => localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark");
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem(THEME_KEY);
+    return saved === "light" || saved === "midnight" || saved === "graphite" ? saved : "graphite";
+  });
 
   const currentLogServer = useMemo(
     () => servers.find((server) => server.id === logsFor),
@@ -230,7 +233,7 @@ function App() {
         <header className="topbar">
           <div><span className="eyebrow">LOCAL SHIP</span><strong>Your computer</strong></div>
           <div className="topbar-actions">
-            <button className="theme-toggle" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? "☼ LIGHT" : "◐ DARK"}</button>
+            <button className="theme-toggle" aria-label={`Switch to ${theme === "light" ? "graphite" : "light"} mode`} onClick={() => setTheme(theme === "light" ? "graphite" : "light")}>{theme === "light" ? "◐ GRAPHITE" : "☼ LIGHT"}</button>
             <button className="panel-link" onClick={() => void openUrl("https://howl-host.vercel.app/dashboard")}>OPEN CREW PANEL ↗</button>
           </div>
         </header>
@@ -284,6 +287,7 @@ function App() {
           {view === "settings" && <>
             <PageTitle title="Host settings" subtitle="System checks and tunnel controls for this computer." />
             <div className="settings-grid">
+              <section className="settings-card wide appearance-card"><div className="card-heading"><span>APPEARANCE</span><Pill ok /></div><h3>Choose your ship colors</h3><p>The full app updates instantly and remembers your choice.</p><div className="theme-picker"><ThemeChoice theme="graphite" current={theme} label="Graphite" colors={["#202226", "#4a83ff", "#fa4d66"]} onSelect={setTheme} /><ThemeChoice theme="midnight" current={theme} label="Midnight" colors={["#081426", "#34a0ff", "#ff5b74"]} onSelect={setTheme} /><ThemeChoice theme="light" current={theme} label="Snow" colors={["#ffffff", "#2563eb", "#dc334c"]} onSelect={setTheme} /></div></section>
               <section className="settings-card"><div className="card-heading"><span>JAVA RUNTIME</span><Pill ok={Boolean(system?.javaInstalled)} /></div><h3>{system?.javaInstalled ? "Ready" : "Java not found"}</h3><p>{system?.javaVersion ?? "Install Java 21 or newer to run recent Minecraft versions."}</p><button className="ghost" onClick={() => void openUrl("https://adoptium.net/temurin/releases/")}>GET JAVA ↗</button></section>
               <section className="settings-card"><div className="card-heading"><span>PUBLIC TUNNEL</span><Pill ok={playitRunning} /></div><h3>{playitRunning ? "Tunnel running" : "Playit.gg ready"}</h3><p>{system?.playitPath ?? "The official playit.gg agent downloads automatically the first time you start the tunnel."}</p><div className="button-row"><button className="primary" disabled={busy === "playit"} onClick={() => void togglePlayit()}>{busy === "playit" ? "PREPARING…" : playitRunning ? "STOP TUNNEL" : system?.playitInstalled ? "START TUNNEL" : "DOWNLOAD & START"}</button><button className="ghost" onClick={() => void openUrl("https://playit.gg")}>PLAYIT ACCOUNT ↗</button></div></section>
               <section className="settings-card"><div className="card-heading"><span>CREW ACCOUNT</span><Pill ok /></div><h3>Manage the crew</h3><p>Create a free Crew.Ship account to invite managers and choose exactly what they can control in the web panel.</p><div className="button-row"><button className="primary" onClick={() => void openUrl("https://howl-host.vercel.app/signup")}>CREATE ACCOUNT ↗</button><button className="ghost" onClick={() => void openUrl("https://howl-host.vercel.app/dashboard")}>MANAGE CREW ↗</button></div></section>
@@ -313,6 +317,10 @@ function Metric({ value, label, accent = false }: { value: string; label: string
 
 function Pill({ ok }: { ok: boolean }) {
   return <span className={ok ? "pill ok" : "pill"}>{ok ? "● READY" : "○ OFF"}</span>;
+}
+
+function ThemeChoice({ theme, current, label, colors, onSelect }: { theme: Theme; current: Theme; label: string; colors: string[]; onSelect: (theme: Theme) => void }) {
+  return <button type="button" className={current === theme ? "theme-choice selected" : "theme-choice"} onClick={() => onSelect(theme)}><span className="theme-swatches">{colors.map((color) => <i key={color} style={{ background: color }} />)}</span><strong>{label}</strong><small>{current === theme ? "SELECTED" : "APPLY THEME"}</small></button>;
 }
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
