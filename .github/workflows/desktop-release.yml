@@ -12,6 +12,10 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      HOWL_CODE_SIGN_PFX_BASE64: ${{ secrets.HOWL_CODE_SIGN_PFX_BASE64 }}
+      HOWL_CODE_SIGN_PFX_PASSWORD: ${{ secrets.HOWL_CODE_SIGN_PFX_PASSWORD }}
+      HOWL_TIMESTAMP_URL: ${{ secrets.HOWL_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
     defaults:
       run:
         working-directory: desktop
@@ -38,15 +42,11 @@ jobs:
           releaseDraft: false
           prerelease: false
       - name: Sign Windows installers
-        if: ${{ secrets.HOWL_CODE_SIGN_PFX_BASE64 != '' && secrets.HOWL_CODE_SIGN_PFX_PASSWORD != '' }}
+        if: ${{ env.HOWL_CODE_SIGN_PFX_BASE64 != '' && env.HOWL_CODE_SIGN_PFX_PASSWORD != '' }}
         shell: pwsh
-        env:
-          HOWL_CODE_SIGN_PFX_BASE64: ${{ secrets.HOWL_CODE_SIGN_PFX_BASE64 }}
-          HOWL_CODE_SIGN_PFX_PASSWORD: ${{ secrets.HOWL_CODE_SIGN_PFX_PASSWORD }}
-          HOWL_TIMESTAMP_URL: ${{ secrets.HOWL_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
         run: ./scripts/sign-windows.ps1
       - name: Replace release assets with signed installers
-        if: ${{ secrets.HOWL_CODE_SIGN_PFX_BASE64 != '' && secrets.HOWL_CODE_SIGN_PFX_PASSWORD != '' }}
+        if: ${{ env.HOWL_CODE_SIGN_PFX_BASE64 != '' && env.HOWL_CODE_SIGN_PFX_PASSWORD != '' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,6 +1,6 @@
 [package]
 name = "howl-host"
-version = "0.3.0"
+version = "0.3.1"
 description = "Run Howl.Host Minecraft servers on this computer"
 authors = ["Howl.Host"]
 edition = "2021"

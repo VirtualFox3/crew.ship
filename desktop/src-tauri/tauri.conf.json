@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Howl.Host",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "identifier": "host.howl.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
