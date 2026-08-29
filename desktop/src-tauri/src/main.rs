@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    howl_host_lib::run()
+    crew_ship_lib::run()
 }

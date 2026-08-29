@@ -41,6 +41,7 @@ struct SystemStatus {
     playit_installed: bool,
     playit_path: Option<String>,
     data_directory: String,
+    local_address: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -90,7 +91,7 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
 
 fn http_get(url: impl AsRef<str>) -> Result<reqwest::blocking::Response, String> {
     reqwest::blocking::Client::builder()
-        .user_agent("Howl.Host/0.2 (https://github.com/VirtualFox3/Pack.Host)")
+        .user_agent("Crew.Ship/0.4 (https://github.com/VirtualFox3/Pack.Host)")
         .build()
         .map_err(|error| format!("Could not create the download client: {error}"))?
         .get(url.as_ref())
@@ -131,6 +132,13 @@ fn app_servers_dir(app: &AppHandle) -> Result<PathBuf, String> {
     fs::create_dir_all(&servers)
         .map_err(|error| format!("Could not create the servers folder: {error}"))?;
     Ok(servers)
+}
+
+fn local_address() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let address = socket.local_addr().ok()?.ip();
+    if address.is_loopback() { None } else { Some(format!("{address}:25565")) }
 }
 
 fn bundled_playit_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -207,6 +215,7 @@ fn system_status(app: AppHandle) -> Result<SystemStatus, String> {
         playit_installed: playit.is_some(),
         playit_path: playit.map(|path| path.to_string_lossy().into_owned()),
         data_directory,
+        local_address: local_address(),
     })
 }
 
@@ -411,6 +420,9 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
     let directory = jar
         .parent()
         .ok_or_else(|| "The server folder is invalid.".to_owned())?;
+    // Crew.Ship defaults to compatible login mode so both premium and offline
+    // clients can join. Hosts should use a whitelist/auth plugin for identity.
+    set_server_property(&directory.join("server.properties"), "online-mode", "false")?;
 
     let mut servers = state
         .servers
@@ -447,7 +459,7 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
     })?;
     let stdin = child.stdin.take();
     let logs = Arc::new(Mutex::new(VecDeque::from([
-        "[Howl.Host] Starting Minecraft in the background…".to_owned(),
+        "[Crew.Ship] Starting Minecraft in the background…".to_owned(),
     ])));
     if let Some(stdout) = child.stdout.take() {
         read_log_stream(stdout, Arc::clone(&logs));
@@ -461,6 +473,15 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         running: true,
         exit_code: None,
     })
+}
+
+#[tauri::command]
+fn server_mods_directory(app: AppHandle, id: String) -> Result<String, String> {
+    safe_id(&id)?;
+    let directory = app_servers_dir(&app)?.join(&id).join("mods");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Could not create the mods folder: {error}"))?;
+    Ok(directory.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -590,9 +611,10 @@ pub fn run() {
             stop_server,
             server_status,
             server_logs,
+            server_mods_directory,
             start_playit,
             stop_playit
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Howl.Host");
+        .expect("error while running Crew.Ship");
 }

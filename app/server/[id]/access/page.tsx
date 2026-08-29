@@ -35,7 +35,7 @@ export default async function AccessPage({
       <div>
         <h2 className="text-lg font-semibold">Access</h2>
         <p className="mt-1 text-sm text-ink-400">
-          Share the server with friends without handing over your password.
+          Invite your crew to manage the server without handing over your password.
         </p>
       </div>
       <AccessManager

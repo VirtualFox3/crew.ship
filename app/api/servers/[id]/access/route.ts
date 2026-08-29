@@ -37,7 +37,7 @@ export const POST = handler(async (request: Request, { params }: Params) => {
     .ilike("username", parsed.data.username)
     .maybeSingle();
 
-  if (!profile) throw new ApiError("No Howl.Host account with that username.", 404);
+  if (!profile) throw new ApiError("No Crew.Ship account with that username.", 404);
   if (profile.id === ctx.user.id) throw new ApiError("You already own this server.");
 
   // An explicit list wins; otherwise store the role's preset so what the owner

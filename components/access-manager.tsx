@@ -213,11 +213,11 @@ export function AccessManager({
         <Card>
           <CardHeader
             title="Invite someone"
-            description="They need a free Howl.Host account first. Playing needs no account — only the server address."
+            description="They need a free Crew.Ship account first. Playing needs no account — only the server address."
           />
           <form onSubmit={invite} className="space-y-4 p-5">
             <Field
-              label="Howl.Host username"
+              label="Crew.Ship username"
               hint="Not their email or Minecraft name — the username they signed up with."
   className="max-w-sm"
             >
