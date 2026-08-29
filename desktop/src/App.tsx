@@ -4,6 +4,7 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 
 type View = "servers" | "new" | "settings";
+type Theme = "dark" | "light";
 type Software = "vanilla" | "paper" | "fabric";
 
 type SystemStatus = {
@@ -30,6 +31,7 @@ type ProcessStatus = { running: boolean; exitCode?: number };
 
 const STORAGE_KEY = "howl-host-servers-v1";
 const WELCOME_KEY = "crew-ship-welcome-seen";
+const THEME_KEY = "crew-ship-theme";
 
 function savedServers(): InstalledServer[] {
   try {
@@ -57,6 +59,7 @@ function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [playitRunning, setPlayitRunning] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(() => localStorage.getItem(WELCOME_KEY) !== "true");
+  const [theme, setTheme] = useState<Theme>(() => localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark");
 
   const currentLogServer = useMemo(
     () => servers.find((server) => server.id === logsFor),
@@ -106,6 +109,10 @@ function App() {
     const timer = window.setInterval(() => void load(), 1_500);
     return () => window.clearInterval(timer);
   }, [logsFor]);
+
+  useEffect(() => {
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
 
   async function install(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -202,7 +209,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell theme-${theme}`}>
       <aside className="sidebar">
         <button className="brand" onClick={() => setView("servers")}>
           <span className="brand-mark"><i /><i /><i /></span>
@@ -222,7 +229,10 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div><span className="eyebrow">LOCAL SHIP</span><strong>Your computer</strong></div>
-          <button className="panel-link" onClick={() => void openUrl("https://howl-host.vercel.app/dashboard")}>OPEN CREW PANEL ↗</button>
+          <div className="topbar-actions">
+            <button className="theme-toggle" aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? "☼ LIGHT" : "◐ DARK"}</button>
+            <button className="panel-link" onClick={() => void openUrl("https://howl-host.vercel.app/dashboard")}>OPEN CREW PANEL ↗</button>
+          </div>
         </header>
 
         <section className="content">
