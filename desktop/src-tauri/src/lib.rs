@@ -305,6 +305,7 @@ fn software_versions(software: String) -> Result<Vec<String>, String> {
                 }
             })
             .collect();
+        versions.retain(|version| stable_game_version(version));
         versions.sort_by_key(|version| std::cmp::Reverse(version_numbers(version)));
         versions.dedup();
         versions.truncate(100);
@@ -353,6 +354,7 @@ fn software_versions(software: String) -> Result<Vec<String>, String> {
             .collect(),
         _ => Vec::new(),
     };
+    versions.retain(|version| stable_game_version(version));
     if matches!(software.as_str(), "paper" | "purpur") {
         versions.sort_by_key(|version| std::cmp::Reverse(version_numbers(version)));
     }
@@ -366,6 +368,13 @@ fn version_numbers(version: &str) -> Vec<u32> {
         .filter(|part| !part.is_empty())
         .map(|part| part.parse().unwrap_or(0))
         .collect()
+}
+
+fn stable_game_version(version: &str) -> bool {
+    !version.contains('-')
+        && version.split('.').all(|part| {
+            !part.is_empty() && part.chars().all(|character| character.is_ascii_digit())
+        })
 }
 
 fn xml_versions(xml: &str) -> Vec<String> {

@@ -52,6 +52,9 @@ function App() {
   const [view, setView] = useState<View>("servers");
   const [system, setSystem] = useState<SystemStatus>();
   const [versions, setVersions] = useState<string[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState("");
+  const [versionMenuOpen, setVersionMenuOpen] = useState(false);
+  const [versionQuery, setVersionQuery] = useState("");
   const [selectedSoftware, setSelectedSoftware] = useState<Software>("paper");
   const [servers, setServers] = useState<InstalledServer[]>(savedServers);
   const [running, setRunning] = useState<Record<string, boolean>>({});
@@ -100,8 +103,14 @@ function App() {
 
   useEffect(() => {
     setVersions([]);
+    setSelectedVersion("");
+    setVersionMenuOpen(false);
+    setVersionQuery("");
     void invoke<string[]>("software_versions", { software: selectedSoftware })
-      .then(setVersions)
+      .then((items) => {
+        setVersions(items);
+        setSelectedVersion(items[0] ?? "");
+      })
       .catch((cause) => setError(errorMessage(cause)));
   }, [selectedSoftware]);
 
@@ -323,7 +332,7 @@ function App() {
               <div className="form-grid">
                 <label><span>SERVER NAME</span><input name="name" required minLength={2} maxLength={40} placeholder="Friends SMP" /></label>
                 <label><span>SERVER SOFTWARE</span><select name="software" value={selectedSoftware} onChange={(event) => setSelectedSoftware(event.target.value as Software)}><optgroup label="Plugins"><option value="paper">Paper — fast + plugins</option><option value="purpur">Purpur — configurable + plugins</option></optgroup><optgroup label="Mods"><option value="fabric">Fabric — lightweight mods</option><option value="forge">Forge — classic modpacks</option><option value="neoforge">NeoForge — modern modpacks</option></optgroup><optgroup label="Official"><option value="vanilla">Vanilla — no add-ons</option></optgroup></select></label>
-                <label><span>MINECRAFT VERSION</span><select name="version" required disabled={!versions.length}>{versions.map((version) => <option key={version}>{version}</option>)}</select></label>
+                <label><span>MINECRAFT VERSION</span><input type="hidden" name="version" value={selectedVersion} /><div className="version-picker"><button type="button" className="version-trigger" disabled={!versions.length} aria-expanded={versionMenuOpen} onClick={() => setVersionMenuOpen((open) => !open)}><strong>{selectedVersion || "Loading stable versions…"}</strong><span>⌄</span></button>{versionMenuOpen && <div className="version-menu"><input aria-label="Filter Minecraft versions" value={versionQuery} onChange={(event) => setVersionQuery(event.target.value)} placeholder="Filter versions…" /><div className="version-options" role="listbox">{versions.filter((version) => version.includes(versionQuery.trim())).slice(0, 30).map((version) => <button type="button" role="option" aria-selected={version === selectedVersion} className={version === selectedVersion ? "selected" : ""} key={version} onClick={() => { setSelectedVersion(version); setVersionMenuOpen(false); setVersionQuery(""); }}>{version}<small>{version === versions[0] ? "LATEST" : "STABLE"}</small></button>)}</div></div>}</div></label>
                 <label><span>MEMORY</span><select name="memory" defaultValue="4096"><option value="2048">2 GB</option><option value="4096">4 GB</option><option value="6144">6 GB</option><option value="8192">8 GB</option><option value="12288">12 GB</option></select></label>
                 <div className="fact"><b>REAL UPSTREAM BUILDS</b><p>Versions come live from Mojang and each loader's official release service—not a hard-coded list.</p></div>
                 <div className="offline-check"><span><b>COMPATIBLE PLAYER ACCESS</b><small>Premium and offline clients can join. Add a whitelist or authentication plugin before sharing publicly.</small></span></div>
