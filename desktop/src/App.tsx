@@ -6,7 +6,8 @@ import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { supabase } from "./supabase";
 import "./App.css";
 
-type View = "servers" | "new" | "marketplace" | "crew" | "settings";
+type View = "servers" | "server" | "new" | "marketplace" | "crew" | "settings";
+type ServerTab = "server" | "options" | "console" | "log" | "players" | "software" | "files" | "worlds" | "backups" | "access";
 type Theme = "graphite" | "slate" | "ocean" | "forest" | "violet" | "ember" | "light" | "custom";
 type Software = "vanilla" | "paper" | "purpur" | "fabric" | "forge" | "neoforge";
 
@@ -39,6 +40,7 @@ type InstalledAddon = { name: string; filename: string; directory: string };
 type Profile = { username: string; display_name?: string | null; avatar_url?: string | null };
 type CrewMember = { user_id: string; role: "admin" | "moderator" | "viewer"; permissions?: string[] | null; profiles?: Profile | null };
 type ServerInvite = { token: string; expires_at: string };
+type ServerSettings = { maxPlayers: number; gamemode: string; difficulty: string; whiteList: boolean; allowFlight: boolean; forceGamemode: boolean; spawnProtection: number; requireResourcePack: boolean; resourcePack: string; resourcePackPrompt: string; keepInventory: boolean };
 
 const STORAGE_KEY = "crew-ship-servers-v1";
 const LEGACY_STORAGE_KEY = "howl-host-servers-v1";
@@ -101,6 +103,10 @@ function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [authMessage, setAuthMessage] = useState<string>();
   const [view, setView] = useState<View>("servers");
+  const [selectedServerId, setSelectedServerId] = useState("");
+  const [serverTab, setServerTab] = useState<ServerTab>("server");
+  const [settingsDraft, setSettingsDraft] = useState<ServerSettings>();
+  const [consoleCommand, setConsoleCommand] = useState("");
   const [system, setSystem] = useState<SystemStatus>();
   const [versions, setVersions] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState("");
@@ -136,6 +142,10 @@ function App() {
   const currentLogServer = useMemo(
     () => servers.find((server) => server.id === logsFor),
     [logsFor, servers],
+  );
+  const activeServer = useMemo(
+    () => servers.find((server) => server.id === selectedServerId) ?? servers[0],
+    [selectedServerId, servers],
   );
 
   useEffect(() => {
@@ -262,6 +272,14 @@ function App() {
   }, [logsFor]);
 
   useEffect(() => {
+    if (view !== "server" || !activeServer || !["console", "log", "players"].includes(serverTab)) return;
+    const load = () => invoke<string[]>("server_logs", { id: activeServer.id }).then(setLogs);
+    void load().catch(() => undefined);
+    const timer = window.setInterval(() => void load().catch(() => undefined), 1_500);
+    return () => window.clearInterval(timer);
+  }, [view, activeServer, serverTab]);
+
+  useEffect(() => {
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
@@ -328,6 +346,47 @@ function App() {
       setError(errorMessage(cause));
     } finally {
       setBusy(undefined);
+    }
+  }
+
+  async function openServer(server: InstalledServer, tab: ServerTab = "server") {
+    setSelectedServerId(server.id);
+    setServerTab(tab);
+    setView("server");
+    if (tab === "options") {
+      try {
+        setSettingsDraft(await invoke<ServerSettings>("server_settings", { id: server.id }));
+      } catch (cause) {
+        setError(errorMessage(cause));
+      }
+    }
+  }
+
+  async function saveServerSettings() {
+    if (!activeServer || !settingsDraft) return;
+    setBusy("server-settings");
+    setError(undefined);
+    try {
+      await invoke("save_server_settings", { id: activeServer.id, settings: settingsDraft });
+      if (running[activeServer.id]) {
+        await invoke("send_server_command", { id: activeServer.id, command: `gamerule keepInventory ${settingsDraft.keepInventory ? "true" : "false"}` });
+      }
+      setNotice("Server properties saved. Restart the server for all changes to apply.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function sendConsoleCommand(event: FormEvent) {
+    event.preventDefault();
+    if (!activeServer || !consoleCommand.trim()) return;
+    try {
+      await invoke("send_server_command", { id: activeServer.id, command: consoleCommand });
+      setConsoleCommand("");
+    } catch (cause) {
+      setError(errorMessage(cause));
     }
   }
 
@@ -653,6 +712,7 @@ function App() {
                   <div><h3>{server.name}</h3><p>{softwareName(server.software ?? "fabric")} {server.loaderVersion} · Minecraft {server.gameVersion} · {Math.round(server.memoryMb / 1024)} GB · Premium + offline clients</p><p className="server-ip">{running[server.id] ? `JOIN ON LAN: ${addresses[server.id]?.lanAddress ?? "LOADING…"}` : `LAN IP WHEN RUNNING: ${addresses[server.id]?.lanAddress ?? "CHECKING…"}`}</p></div>
                 </div>
                 <div className="server-actions">
+                  <button className="ghost" onClick={() => void openServer(server)}>MANAGE</button>
                   {["fabric", "forge", "neoforge"].includes(server.software ?? "fabric") && <button className="ghost" onClick={() => void openMods(server)}>MODS</button>}
                   <button className="ghost" onClick={() => setLogsFor(server.id)}>CONSOLE</button>
                   <button className="ghost danger-text" disabled={busy === `delete-${server.id}`} onClick={() => void deleteServer(server)}>{busy === `delete-${server.id}` ? "DELETING…" : "DELETE"}</button>
@@ -663,6 +723,27 @@ function App() {
               </article>)}
             </div>}
           </>}
+
+          {view === "server" && (activeServer ? <>
+            <PageTitle title={activeServer.name} subtitle={`${softwareName(activeServer.software ?? "fabric")} · Minecraft ${activeServer.gameVersion} · runs on this computer`} action={<button className={running[activeServer.id] ? "danger-button" : "primary"} onClick={() => void (running[activeServer.id] ? stop(activeServer) : start(activeServer))}>{running[activeServer.id] ? "■ STOP" : "▶ START"}</button>} />
+            <div className="server-workspace">
+              <aside className="server-tabs">
+                {(["server", "options", "console", "log", "players", "software", "files", "worlds", "backups", "access"] as ServerTab[]).map((tab) => <button key={tab} className={serverTab === tab ? "active" : ""} onClick={() => void openServer(activeServer, tab)}>{serverTabIcon(tab)} {serverTabLabel(tab)}</button>)}
+              </aside>
+              <section className="server-detail-panel">
+                {serverTab === "server" && <div className="detail-overview"><span className={`status-dot ${running[activeServer.id] ? "online" : ""}`} /><h2>{running[activeServer.id] ? "Online" : "Offline"}</h2><p>{running[activeServer.id] ? "Your world is running locally." : "Start this server to accept players."}</p><div className="join-address"><span>SERVER IP</span><strong>{addresses[activeServer.id]?.lanAddress ?? "Start server to get LAN address"}</strong><button className="ghost" onClick={() => navigator.clipboard?.writeText(addresses[activeServer.id]?.lanAddress ?? "")}>COPY</button></div><div className="detail-actions"><button className="ghost" onClick={() => void openServer(activeServer, "console")}>OPEN CONSOLE</button><button className="ghost" onClick={() => void openServer(activeServer, "options")}>SERVER OPTIONS</button><button className="ghost" onClick={() => void openServer(activeServer, "access")}>SHARE ACCESS</button></div></div>}
+                {serverTab === "options" && (settingsDraft ? <div className="property-editor"><div className="property-heading"><span>SERVER.PROPERTIES</span><p>Saved locally. Restart the server to apply startup settings.</p></div><div className="property-grid"><NumberProperty label="Slots" value={settingsDraft.maxPlayers} min={1} max={500} onChange={(maxPlayers) => setSettingsDraft({ ...settingsDraft, maxPlayers })} /><SelectProperty label="Gamemode" value={settingsDraft.gamemode} choices={["survival", "creative", "adventure", "spectator"]} onChange={(gamemode) => setSettingsDraft({ ...settingsDraft, gamemode })} /><SelectProperty label="Difficulty" value={settingsDraft.difficulty} choices={["peaceful", "easy", "normal", "hard"]} onChange={(difficulty) => setSettingsDraft({ ...settingsDraft, difficulty })} /><ToggleProperty label="Whitelist" hint="Only approved players may join." value={settingsDraft.whiteList} onChange={(whiteList) => setSettingsDraft({ ...settingsDraft, whiteList })} /><ToggleProperty label="Keep inventory" hint="Players keep items after death." value={settingsDraft.keepInventory} onChange={(keepInventory) => setSettingsDraft({ ...settingsDraft, keepInventory })} /><ToggleProperty label="Fly" hint="Allow flight without a kick." value={settingsDraft.allowFlight} onChange={(allowFlight) => setSettingsDraft({ ...settingsDraft, allowFlight })} /><ToggleProperty label="Force gamemode" hint="Apply selected gamemode on join." value={settingsDraft.forceGamemode} onChange={(forceGamemode) => setSettingsDraft({ ...settingsDraft, forceGamemode })} /><NumberProperty label="Spawn protection" value={settingsDraft.spawnProtection} min={0} max={128} onChange={(spawnProtection) => setSettingsDraft({ ...settingsDraft, spawnProtection })} /><ToggleProperty label="Resource pack required" hint="Require the pack URL below." value={settingsDraft.requireResourcePack} onChange={(requireResourcePack) => setSettingsDraft({ ...settingsDraft, requireResourcePack })} /><label className="property-field"><span>RESOURCE PACK URL</span><input value={settingsDraft.resourcePack} onChange={(event) => setSettingsDraft({ ...settingsDraft, resourcePack: event.target.value })} placeholder="https://example.com/pack.zip" /></label><label className="property-field"><span>RESOURCE PACK PROMPT</span><input value={settingsDraft.resourcePackPrompt} onChange={(event) => setSettingsDraft({ ...settingsDraft, resourcePackPrompt: event.target.value })} placeholder="Optional message for players" /></label></div><button className="primary" disabled={busy === "server-settings"} onClick={() => void saveServerSettings()}>{busy === "server-settings" ? "SAVING…" : "SAVE OPTIONS"}</button></div> : <div className="market-empty"><span>⌛</span><h2>Loading options</h2></div>)}
+                {serverTab === "console" && <div className="console-page"><header><span className="status-dot online" /><b>{activeServer.name} / CONSOLE</b></header><pre>{logs.length ? logs.join("\n") : "Start the server to see console output."}</pre><form onSubmit={sendConsoleCommand}><input value={consoleCommand} onChange={(event) => setConsoleCommand(event.target.value)} placeholder={running[activeServer.id] ? "Type a Minecraft command…" : "Start server to send commands"} disabled={!running[activeServer.id]} /><button className="primary" disabled={!running[activeServer.id]}>SEND</button></form></div>}
+                {serverTab === "log" && <div className="console-page read-only"><header><b>LIVE LOG</b><button className="ghost" onClick={() => void openPath(activeServer.jarPath.substring(0, Math.max(activeServer.jarPath.lastIndexOf("\\"), activeServer.jarPath.lastIndexOf("/"))))}>OPEN LOG FOLDER</button></header><pre>{logs.length ? logs.join("\n") : "Logs will appear once the server starts."}</pre></div>}
+                {serverTab === "players" && <div className="detail-section"><h2>Players</h2><p>Use the console command <code>list</code> to see the current players. Whitelist and player slots are in Options.</p><button className="primary" disabled={!running[activeServer.id]} onClick={() => { setConsoleCommand("list"); void openServer(activeServer, "console"); }}>CHECK PLAYERS</button></div>}
+                {serverTab === "software" && <div className="detail-section"><h2>{softwareName(activeServer.software ?? "fabric")}</h2><p>Minecraft {activeServer.gameVersion} · build {activeServer.loaderVersion}</p><p>{["fabric", "forge", "neoforge"].includes(activeServer.software ?? "") ? "This server accepts compatible mods from Marketplace." : ["paper", "purpur"].includes(activeServer.software ?? "") ? "This server accepts compatible plugins from Marketplace." : "Vanilla has no add-on loader."}</p><button className="primary" onClick={() => setView("marketplace")}>OPEN MARKETPLACE</button></div>}
+                {serverTab === "files" && <FolderPanel title="Server files" text="Open this server’s folder to manage configs, datapacks, and downloaded files." path={activeServer.jarPath} />}
+                {serverTab === "worlds" && <FolderPanel title="Worlds" text="Your worlds are stored locally in the server folder. Stop the server before manually replacing a world." path={activeServer.jarPath} />}
+                {serverTab === "backups" && <FolderPanel title="Backups" text="Create a copy of this server folder before modpack or world changes. Automatic zip backups are next on the local-host roadmap." path={activeServer.jarPath} />}
+                {serverTab === "access" && <div className="detail-section"><h2>Share access</h2><p>Invite a trusted person by Crew.Ship username or generate a one-use admin link. Their account controls their access—your world stays on this computer.</p><button className="primary" onClick={() => { setCrewServerId(activeServer.id); setView("crew"); }}>MANAGE ACCESS</button></div>}
+              </section>
+            </div>
+          </> : <EmptyState onCreate={() => setView("new")} />)}
 
           {view === "new" && <>
             <PageTitle title="Build a server" subtitle="Choose your engine. Crew.Ship downloads the official upstream build to this computer." />
@@ -744,6 +825,31 @@ function Metric({ value, label, accent = false }: { value: string; label: string
 
 function Pill({ ok }: { ok: boolean }) {
   return <span className={ok ? "pill ok" : "pill"}>{ok ? "● READY" : "○ OFF"}</span>;
+}
+
+function serverTabLabel(tab: ServerTab) {
+  return ({ server: "Server", options: "Options", console: "Console", log: "Log", players: "Players", software: "Software", files: "Files", worlds: "Worlds", backups: "Backups", access: "Access" } as Record<ServerTab, string>)[tab];
+}
+
+function serverTabIcon(tab: ServerTab) {
+  return ({ server: "◉", options: "⚙", console: "›_", log: "≡", players: "♟", software: "◆", files: "▣", worlds: "◌", backups: "↶", access: "♙" } as Record<ServerTab, string>)[tab];
+}
+
+function NumberProperty({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
+  return <label className="property-field"><span>{label.toUpperCase()}</span><input type="number" min={min} max={max} value={value} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value) || min)))} /></label>;
+}
+
+function SelectProperty({ label, value, choices, onChange }: { label: string; value: string; choices: string[]; onChange: (value: string) => void }) {
+  return <label className="property-field"><span>{label.toUpperCase()}</span><select value={value} onChange={(event) => onChange(event.target.value)}>{choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}</select></label>;
+}
+
+function ToggleProperty({ label, hint, value, onChange }: { label: string; hint: string; value: boolean; onChange: (value: boolean) => void }) {
+  return <label className="toggle-property"><span><b>{label}</b><small>{hint}</small></span><input aria-label={label} type="checkbox" checked={value} onChange={(event) => onChange(event.target.checked)} /><i aria-hidden="true" /></label>;
+}
+
+function FolderPanel({ title, text, path }: { title: string; text: string; path: string }) {
+  const directory = path.substring(0, Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/")));
+  return <div className="detail-section"><h2>{title}</h2><p>{text}</p><button className="primary" onClick={() => void openPath(directory)}>OPEN FOLDER</button></div>;
 }
 
 function LoginScreen({ externalMessage }: { externalMessage?: string }) {

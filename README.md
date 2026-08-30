@@ -1,5 +1,7 @@
 # Howl.Host
 
+> **Looking for the local desktop host?** Download the official Windows installer from the [Crew.Ship Desktop releases page](https://github.com/VirtualFox3/Pack.Host/releases). Crew.Ship runs Minecraft servers on the host's own computer, includes local server options, a console, file/world folders, backups guidance, access invites, and Modrinth Marketplace.
+
 Free Minecraft server hosting. No ads, no plugin caps, no paid tier.
 
 An Aternos-style control panel and hosting stack, built to remove the limits

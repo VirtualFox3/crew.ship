@@ -45,7 +45,7 @@ jobs:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
           releaseName: "Crew.Ship Desktop v__VERSION__"
-          releaseBody: "Native Windows Minecraft host for Crew.Ship. Runs servers and playit.gg on your own computer."
+          releaseBody: "Official Crew.Ship Desktop release. Native Windows Minecraft host with server options, console, local IP, files/worlds, access invites, Modrinth Marketplace, and bundled playit.gg. Runs on your own computer."
           releaseDraft: false
           prerelease: false
       - name: Sign Windows installers

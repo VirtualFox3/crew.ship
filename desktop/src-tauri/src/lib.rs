@@ -83,6 +83,22 @@ struct ServerAddress {
     port: u16,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerSettings {
+    max_players: u16,
+    gamemode: String,
+    difficulty: String,
+    white_list: bool,
+    allow_flight: bool,
+    force_gamemode: bool,
+    spawn_protection: u16,
+    require_resource_pack: bool,
+    resource_pack: String,
+    resource_pack_prompt: String,
+    keep_inventory: bool,
+}
+
 #[derive(Deserialize)]
 struct ModrinthSearchResponse {
     hits: Vec<ModrinthHit>,
@@ -275,6 +291,15 @@ fn set_server_property(path: &Path, key: &str, value: &str) -> Result<(), String
     }
     fs::write(path, format!("{}\n", lines.join("\n")))
         .map_err(|error| format!("Could not update server.properties: {error}"))
+}
+
+fn property_value(contents: &str, key: &str, fallback: &str) -> String {
+    contents
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}=")))
+        .unwrap_or(fallback)
+        .trim()
+        .to_owned()
 }
 
 fn server_port(path: &Path) -> u16 {
@@ -643,6 +668,81 @@ fn set_offline_mode(app: AppHandle, id: String, offline_mode: bool) -> Result<()
 }
 
 #[tauri::command]
+fn server_settings(app: AppHandle, id: String) -> Result<ServerSettings, String> {
+    safe_id(&id)?;
+    let contents = fs::read_to_string(app_servers_dir(&app)?.join(&id).join("server.properties"))
+        .map_err(|error| format!("Could not read server.properties: {error}"))?;
+    let keep_inventory = fs::read_to_string(app_servers_dir(&app)?.join(&id).join(".crewship-settings.json"))
+        .ok()
+        .and_then(|value| serde_json::from_str::<Value>(&value).ok())
+        .and_then(|value| value.get("keepInventory").and_then(Value::as_bool))
+        .unwrap_or(false);
+    Ok(ServerSettings {
+        max_players: property_value(&contents, "max-players", "20").parse().unwrap_or(20),
+        gamemode: property_value(&contents, "gamemode", "survival"),
+        difficulty: property_value(&contents, "difficulty", "easy"),
+        white_list: property_value(&contents, "white-list", "false") == "true",
+        allow_flight: property_value(&contents, "allow-flight", "false") == "true",
+        force_gamemode: property_value(&contents, "force-gamemode", "false") == "true",
+        spawn_protection: property_value(&contents, "spawn-protection", "16").parse().unwrap_or(16),
+        require_resource_pack: property_value(&contents, "require-resource-pack", "false") == "true",
+        resource_pack: property_value(&contents, "resource-pack", ""),
+        resource_pack_prompt: property_value(&contents, "resource-pack-prompt", ""),
+        keep_inventory,
+    })
+}
+
+#[tauri::command]
+fn save_server_settings(app: AppHandle, id: String, settings: ServerSettings) -> Result<(), String> {
+    safe_id(&id)?;
+    if settings.max_players == 0 || settings.max_players > 500 {
+        return Err("Player slots must be between 1 and 500.".into());
+    }
+    if settings.spawn_protection > 128 {
+        return Err("Spawn protection must be between 0 and 128.".into());
+    }
+    if !matches!(settings.gamemode.as_str(), "survival" | "creative" | "adventure" | "spectator") {
+        return Err("Choose a valid game mode.".into());
+    }
+    if !matches!(settings.difficulty.as_str(), "peaceful" | "easy" | "normal" | "hard") {
+        return Err("Choose a valid difficulty.".into());
+    }
+    let path = app_servers_dir(&app)?.join(&id).join("server.properties");
+    for (key, value) in [
+        ("max-players", settings.max_players.to_string()),
+        ("gamemode", settings.gamemode),
+        ("difficulty", settings.difficulty),
+        ("white-list", settings.white_list.to_string()),
+        ("allow-flight", settings.allow_flight.to_string()),
+        ("force-gamemode", settings.force_gamemode.to_string()),
+        ("spawn-protection", settings.spawn_protection.to_string()),
+        ("require-resource-pack", settings.require_resource_pack.to_string()),
+        ("resource-pack", settings.resource_pack),
+        ("resource-pack-prompt", settings.resource_pack_prompt),
+    ] {
+        set_server_property(&path, key, &value)?;
+    }
+    let sidecar = app_servers_dir(&app)?.join(&id).join(".crewship-settings.json");
+    fs::write(sidecar, serde_json::json!({ "keepInventory": settings.keep_inventory }).to_string())
+        .map_err(|error| format!("Could not save Crew.Ship settings: {error}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn send_server_command(id: String, command: String, state: State<'_, HostState>) -> Result<(), String> {
+    safe_id(&id)?;
+    let mut servers = state.servers.lock().map_err(|_| "The local server manager is unavailable.".to_owned())?;
+    let managed = servers.get_mut(&id).ok_or("Start this server before sending commands.")?;
+    if managed.child.try_wait().map_err(|error| error.to_string())?.is_some() {
+        return Err("This server is not running.".into());
+    }
+    let stdin = managed.stdin.as_mut().ok_or("The server console is unavailable.")?;
+    stdin.write_all(command.trim().as_bytes()).map_err(|error| error.to_string())?;
+    stdin.write_all(b"\n").map_err(|error| error.to_string())?;
+    stdin.flush().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn server_address(app: AppHandle, id: String) -> Result<ServerAddress, String> {
     safe_id(&id)?;
     let properties = app_servers_dir(&app)?.join(&id).join("server.properties");
@@ -718,6 +818,14 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         .map_err(|error| format!("Could not configure server memory: {error}"))?;
         #[cfg(windows)]
         {
+            // `canonicalize` returns an extended-length `\\?\C:\...` path on
+            // Windows. Java accepts that form, but cmd.exe does not treat it as
+            // an executable batch-file name. Pass the ordinary path to cmd.
+            let native_path = launch_path.to_string_lossy();
+            let display_path = native_path
+                .strip_prefix(r"\\?\")
+                .unwrap_or(native_path.as_ref())
+                .to_owned();
             let mut script = Command::new("cmd.exe");
             // `cmd /C` needs an explicit `call` for batch files. Without it,
             // paths with spaces can return immediately and Forge/NeoForge looks
@@ -725,7 +833,7 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
             script
                 .arg("/D")
                 .arg("/C")
-                .arg(format!("call \"{}\" nogui", launch_path.to_string_lossy()));
+                .arg(format!("call \"{display_path}\" nogui"));
             script
         }
         #[cfg(not(windows))]
@@ -762,6 +870,11 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         read_log_stream(stderr, Arc::clone(&logs));
     }
 
+    let keep_inventory = fs::read_to_string(directory.join(".crewship-settings.json"))
+        .ok()
+        .and_then(|value| serde_json::from_str::<Value>(&value).ok())
+        .and_then(|value| value.get("keepInventory").and_then(Value::as_bool))
+        .unwrap_or(false);
     servers.insert(config.id.clone(), ManagedServer { child, stdin, logs: Arc::clone(&logs) });
     // Let launchers report an immediate configuration or Java failure instead
     // of claiming the world is running. The console remains available in either
@@ -769,6 +882,12 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
     thread::sleep(Duration::from_millis(700));
     let managed = servers.get_mut(&config.id).ok_or("Server state disappeared.")?;
     let exit_code = managed.child.try_wait().map_err(|error| error.to_string())?.and_then(|status| status.code());
+    if exit_code.is_none() {
+        if let Some(stdin) = managed.stdin.as_mut() {
+            let _ = stdin.write_all(format!("gamerule keepInventory {keep_inventory}\n").as_bytes());
+            let _ = stdin.flush();
+        }
+    }
     Ok(ProcessStatus {
         running: exit_code.is_none(),
         exit_code,
@@ -1070,9 +1189,12 @@ pub fn run() {
             software_versions,
             install_server,
             set_offline_mode,
+            server_settings,
+            save_server_settings,
             server_address,
             start_server,
             stop_server,
+            send_server_command,
             delete_server,
             server_status,
             server_logs,

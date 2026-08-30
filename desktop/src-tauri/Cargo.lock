@@ -600,7 +600,7 @@ dependencies = [
 
 [[package]]
 name = "crew-ship"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
