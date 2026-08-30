@@ -3,11 +3,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "Howl.Host — Free Minecraft server hosting, no ads",
-    template: "%s · Howl.Host",
+    default: "Crew.Ship — Local Minecraft server hosting",
+    template: "%s · Crew.Ship",
   },
   description:
-    "Free Minecraft servers with unlimited plugins and mods, Java and Bedrock crossplay, every version, and no queue. Runs on your own machine.",
+    "Run Minecraft servers locally with Crew.Ship: server options, Marketplace, crew access, and optional playit.gg tunnelling.",
   keywords: [
     "free minecraft server hosting",
     "minecraft server",
@@ -19,9 +19,9 @@ export const metadata: Metadata = {
     "forge",
   ],
   openGraph: {
-    title: "Howl.Host — Free Minecraft server hosting",
+    title: "Crew.Ship — Local Minecraft server hosting",
     description:
-      "Unlimited plugins and mods. Java + Bedrock. Every version. No ads, no queue, no paywall.",
+      "Host Minecraft on your own computer. Your worlds, your files, your crew.",
     type: "website",
   },
 };

@@ -3,8 +3,8 @@ import Link from "next/link";
 
 export const metadata: Metadata = { title: "Crew.Ship Desktop — Official downloads", description: "Download the official Crew.Ship Windows app to host Minecraft servers locally." };
 
-const RELEASES = "https://github.com/VirtualFox3/Pack.Host/releases";
-const LATEST_RELEASE = "https://github.com/VirtualFox3/Pack.Host/releases/latest";
+const RELEASES = "https://github.com/VirtualFox3/Crew.Ship/releases";
+const LATEST_RELEASE = "https://github.com/VirtualFox3/Crew.Ship/releases/latest";
 
 export default function DownloadPage() {
   return <main className="min-h-screen overflow-hidden bg-[#ededed] text-[#1d2028]">
@@ -21,7 +21,7 @@ export default function DownloadPage() {
           <h1 className="font-mono text-5xl font-black leading-[.88] tracking-[-.09em] text-[#151820] sm:text-7xl lg:text-[82px]">YOUR WORLD.<br />YOUR MACHINE.<br /><span className="text-[#2d61dc]">YOUR CREW.</span></h1>
           <p className="mt-7 max-w-xl text-base leading-relaxed text-[#586174]">Crew.Ship is the local Minecraft host. It installs official server software, runs worlds on your PC, shows your LAN address, and lets you share server access with people you trust.</p>
           <div className="mt-8 flex flex-wrap items-center gap-4"><a href={LATEST_RELEASE} className="group inline-flex items-center gap-3 bg-[#2d61dc] px-6 py-4 font-mono text-sm font-black tracking-[.05em] text-white shadow-[7px_7px_0_#dc5367] transition-transform hover:-translate-y-1"><span className="text-lg">↓</span> DOWNLOAD FOR WINDOWS</a><span className="font-mono text-[10px] leading-relaxed tracking-[.08em] text-[#6b7384]">WINDOWS 10/11 · X64<br />LOCAL HOST · FREE</span></div>
-          <p className="mt-6 max-w-lg border-l-2 border-[#dc5367] pl-3 text-xs leading-relaxed text-[#626b7c]">The installer is published only on our official GitHub Releases page. Windows can show a reputation warning for brand-new unsigned builds—always verify that the link opens the VirtualFox3/Pack.Host release page.</p>
+          <p className="mt-6 max-w-lg border-l-2 border-[#dc5367] pl-3 text-xs leading-relaxed text-[#626b7c]">The installer is published only on our official GitHub Releases page. Windows can show a reputation warning for brand-new unsigned builds—always verify that the link opens the VirtualFox3/Crew.Ship release page.</p>
         </div>
 
         <div className="relative mx-auto w-full max-w-[530px] border-2 border-[#1d2028] bg-[#22252d] p-4 shadow-[12px_12px_0_#dc5367]">

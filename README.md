@@ -1,13 +1,13 @@
-# Howl.Host
+# Crew.Ship
 
-> **Looking for the local desktop host?** Download the official Windows installer from the [Crew.Ship Desktop releases page](https://github.com/VirtualFox3/Pack.Host/releases). Crew.Ship runs Minecraft servers on the host's own computer, includes local server options, a console, file/world folders, backups guidance, access invites, and Modrinth Marketplace.
+> **Looking for the local desktop host?** Download the official Windows installer from the [Crew.Ship Desktop releases page](https://github.com/VirtualFox3/Crew.Ship/releases). Crew.Ship runs Minecraft servers on the host's own computer, includes local server options, a console, file/world folders, backups guidance, access invites, and Modrinth Marketplace.
 
 Free Minecraft server hosting. No ads, no plugin caps, no paid tier.
 
 An Aternos-style control panel and hosting stack, built to remove the limits
 that free hosts normally use as upsell pressure.
 
-| | Howl.Host | Typical free host |
+| | Crew.Ship | Typical free host |
 |---|---|---|
 | Price | Free | Free with limits |
 | Ads | None | Interstitials + video |
@@ -18,6 +18,16 @@ that free hosts normally use as upsell pressure.
 | RAM | Up to 16 GB | Fixed, low |
 | Players | Up to 1000 slots | ~20 |
 | Queue | First-come, position shown | Skippable for money |
+
+## Screenshots
+
+### Landing page
+
+![Crew.Ship landing page](docs/screenshots/crew-ship-home.png)
+
+### Official desktop release page
+
+![Crew.Ship release page](docs/screenshots/crew-ship-release.png)
 
 ## What's in here
 
