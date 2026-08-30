@@ -826,14 +826,22 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
                 .strip_prefix(r"\\?\")
                 .unwrap_or(native_path.as_ref())
                 .to_owned();
+            if !Path::new(&display_path).is_file() {
+                return Err(format!(
+                    "The {} launch script is missing. Reinstall this server.",
+                    config.software
+                ));
+            }
             let mut script = Command::new("cmd.exe");
-            // `cmd /C` needs an explicit `call` for batch files. Without it,
-            // paths with spaces can return immediately and Forge/NeoForge looks
-            // like it started, then stops before Minecraft is ever launched.
+            // Give cmd each token separately. Letting Rust quote the path avoids
+            // the literal `\\\"C:\\...` command seen in older builds when the
+            // Crew.Ship data folder contains spaces.
             script
                 .arg("/D")
                 .arg("/C")
-                .arg(format!("call \"{display_path}\" nogui"));
+                .arg("call")
+                .arg(display_path)
+                .arg("nogui");
             script
         }
         #[cfg(not(windows))]
