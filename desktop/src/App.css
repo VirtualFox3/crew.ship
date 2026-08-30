@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&family=Pixelify+Sans:wght@500;600;700&display=swap');
 @font-face{font-family:"Minecraft Ten";src:url('/fonts/MinecraftTen.woff2') format('woff2');font-display:swap;font-weight:400;font-style:normal}
 
-:root{font-family:Inter,Arial,sans-serif;font-synthesis:none;text-rendering:optimizeLegibility}*{box-sizing:border-box}body{margin:0;min-width:900px;min-height:620px}button,input,select{font:inherit}
+:root{font-family:"Minecraft Ten",monospace;font-synthesis:none;text-rendering:optimizeLegibility}*{box-sizing:border-box}body{margin:0;min-width:900px;min-height:620px}button,input,select{font:inherit}
 .app-shell{--title:"Minecraft Ten","Pixelify Sans",monospace;--canvas:#f6f8fc;--paper:#fff;--paper-2:#eff4fa;--ink:#111827;--muted:#64748b;--line:#d9e2ef;--blue:#2563eb;--blue-dark:#173f9e;--blue-soft:#e9f1ff;--red:#dc334c;--red-dark:#9d1b31;--red-soft:#ffedf0;--green:#0f9b69;--shadow:0 8px 22px rgba(17,24,39,.08);min-height:100vh;display:grid;grid-template-columns:252px 1fr;color:var(--ink);background:var(--canvas)}
 .app-shell.theme-graphite{--canvas:#181818;--paper:#202020;--paper-2:#292929;--ink:#f4f4f4;--muted:#aaa;--line:#3b3b3b;--blue:#5d91f4;--blue-dark:#a7c4ff;--blue-soft:#272f3d;--red:#df596a;--red-dark:#ff9aa7;--red-soft:#3c292c;--green:#63d6a3;--shadow:0 10px 24px rgba(0,0,0,.3)}
 .app-shell.theme-slate{--canvas:#1b1e23;--paper:#23272d;--paper-2:#2c3138;--ink:#f2f5f8;--muted:#aab2bc;--line:#3c434d;--blue:#78a7ff;--blue-dark:#b5ceff;--blue-soft:#29364c;--red:#ef7180;--red-dark:#ffadb7;--red-soft:#442d32;--green:#65d9aa;--shadow:0 10px 24px rgba(0,0,0,.3)}
