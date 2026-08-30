@@ -2,7 +2,7 @@
   "name": "crew-ship",
   "version": "1.0.0",
   "private": true,
-  "description": "Howl.Host \u2014 free, unlimited Minecraft server hosting panel (Java + Bedrock)",
+  "description": "Crew.Ship — local Minecraft hosting panel and native desktop host",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
