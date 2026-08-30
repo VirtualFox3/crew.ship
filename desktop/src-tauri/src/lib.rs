@@ -451,13 +451,25 @@ fn install_server(
                     .json()
                     .map_err(|error| format!("Fabric returned invalid metadata: {error}"))?;
             let entry = entries
-                .first()
+                .iter()
+                .find(|item| item["loader"]["stable"].as_bool().unwrap_or(false))
+                .or_else(|| entries.first())
                 .ok_or_else(|| "No Fabric loader exists for that version.".to_owned())?;
             let loader = entry["loader"]["version"]
                 .as_str()
                 .ok_or("Missing Fabric loader version.")?;
-            let installer = entry["installer"]["version"]
-                .as_str()
+            // Fabric metadata v2 stopped embedding an `installer` object in
+            // each loader response. Resolve the current official installer
+            // separately so Fabric installs keep working as the API evolves.
+            let installers: Vec<Value> = http_get(format!("{FABRIC_META}/versions/installer"))
+                .map_err(|error| format!("Could not load the Fabric installer: {error}"))?
+                .json()
+                .map_err(|error| format!("Fabric returned invalid installer metadata: {error}"))?;
+            let installer = installers
+                .iter()
+                .find(|item| item["stable"].as_bool().unwrap_or(false))
+                .or_else(|| installers.first())
+                .and_then(|item| item["version"].as_str())
                 .ok_or("Missing Fabric installer version.")?;
             (
                 format!(
