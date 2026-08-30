@@ -76,6 +76,13 @@ struct ProcessStatus {
     exit_code: Option<i32>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerAddress {
+    lan_address: Option<String>,
+    port: u16,
+}
+
 #[derive(Deserialize)]
 struct ModrinthSearchResponse {
     hits: Vec<ModrinthHit>,
@@ -185,15 +192,19 @@ fn app_servers_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(servers)
 }
 
-fn local_address() -> Option<String> {
+fn local_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
     let address = socket.local_addr().ok()?.ip();
     if address.is_loopback() {
         None
     } else {
-        Some(format!("{address}:25565"))
+        Some(address)
     }
+}
+
+fn local_address() -> Option<String> {
+    local_ip().map(|address| format!("{address}:25565"))
 }
 
 fn bundled_playit_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -264,6 +275,24 @@ fn set_server_property(path: &Path, key: &str, value: &str) -> Result<(), String
     }
     fs::write(path, format!("{}\n", lines.join("\n")))
         .map_err(|error| format!("Could not update server.properties: {error}"))
+}
+
+fn server_port(path: &Path) -> u16 {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| contents.lines().find_map(|line| line.strip_prefix("server-port=")?.trim().parse().ok()))
+        .unwrap_or(25565)
+}
+
+fn first_available_port(servers_dir: &Path) -> u16 {
+    let used: Vec<u16> = fs::read_dir(servers_dir)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.flatten())
+        .filter_map(|entry| fs::read_to_string(entry.path().join("server.properties")).ok())
+        .filter_map(|contents| contents.lines().find_map(|line| line.strip_prefix("server-port=")?.trim().parse().ok()))
+        .collect();
+    (25565..=25665).find(|port| !used.contains(port)).unwrap_or(25565)
 }
 
 #[tauri::command]
@@ -530,7 +559,8 @@ fn install_server(
         .bytes()
         .map_err(|error| format!("Could not read the server download: {error}"))?;
 
-    let directory = app_servers_dir(&app)?.join(&id);
+    let servers_directory = app_servers_dir(&app)?;
+    let directory = servers_directory.join(&id);
     fs::create_dir_all(&directory)
         .map_err(|error| format!("Could not create the server directory: {error}"))?;
     let download_path = directory.join(if needs_installer {
@@ -573,6 +603,11 @@ fn install_server(
         "online-mode",
         if offline_mode { "false" } else { "true" },
     )?;
+    set_server_property(
+        &directory.join("server.properties"),
+        "server-port",
+        &first_available_port(&servers_directory).to_string(),
+    )?;
 
     Ok(InstalledServer {
         id,
@@ -593,6 +628,17 @@ fn set_offline_mode(app: AppHandle, id: String, offline_mode: bool) -> Result<()
         "online-mode",
         if offline_mode { "false" } else { "true" },
     )
+}
+
+#[tauri::command]
+fn server_address(app: AppHandle, id: String) -> Result<ServerAddress, String> {
+    safe_id(&id)?;
+    let properties = app_servers_dir(&app)?.join(&id).join("server.properties");
+    let port = server_port(&properties);
+    Ok(ServerAddress {
+        lan_address: local_ip().map(|address| format!("{address}:{port}")),
+        port,
+    })
 }
 
 fn read_log_stream<R: std::io::Read + Send + 'static>(
@@ -661,7 +707,13 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         #[cfg(windows)]
         {
             let mut script = Command::new("cmd.exe");
-            script.args(["/D", "/C", launch_path.to_string_lossy().as_ref(), "nogui"]);
+            // `cmd /C` needs an explicit `call` for batch files. Without it,
+            // paths with spaces can return immediately and Forge/NeoForge looks
+            // like it started, then stops before Minecraft is ever launched.
+            script
+                .arg("/D")
+                .arg("/C")
+                .arg(format!("call \"{}\" nogui", launch_path.to_string_lossy()));
             script
         }
         #[cfg(not(windows))]
@@ -698,11 +750,43 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         read_log_stream(stderr, Arc::clone(&logs));
     }
 
-    servers.insert(config.id, ManagedServer { child, stdin, logs });
+    servers.insert(config.id.clone(), ManagedServer { child, stdin, logs: Arc::clone(&logs) });
+    // Let launchers report an immediate configuration or Java failure instead
+    // of claiming the world is running. The console remains available in either
+    // case, so users can see the real loader error.
+    thread::sleep(Duration::from_millis(700));
+    let managed = servers.get_mut(&config.id).ok_or("Server state disappeared.")?;
+    let exit_code = managed.child.try_wait().map_err(|error| error.to_string())?.and_then(|status| status.code());
     Ok(ProcessStatus {
-        running: true,
-        exit_code: None,
+        running: exit_code.is_none(),
+        exit_code,
     })
+}
+
+#[tauri::command]
+fn delete_server(app: AppHandle, id: String, state: State<'_, HostState>) -> Result<(), String> {
+    safe_id(&id)?;
+    if let Some(mut managed) = state
+        .servers
+        .lock()
+        .map_err(|_| "State lock failed.")?
+        .remove(&id)
+    {
+        if let Some(mut stdin) = managed.stdin.take() {
+            let _ = stdin.write_all(b"stop\n");
+            let _ = stdin.flush();
+        }
+        thread::sleep(Duration::from_millis(250));
+        if managed.child.try_wait().map_err(|error| error.to_string())?.is_none() {
+            let _ = managed.child.kill();
+            let _ = managed.child.wait();
+        }
+    }
+    let target = app_servers_dir(&app)?.join(&id);
+    if target.exists() {
+        fs::remove_dir_all(&target).map_err(|error| format!("Could not remove this server's files: {error}"))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -974,8 +1058,10 @@ pub fn run() {
             software_versions,
             install_server,
             set_offline_mode,
+            server_address,
             start_server,
             stop_server,
+            delete_server,
             server_status,
             server_logs,
             server_mods_directory,

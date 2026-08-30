@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { User } from "@supabase/supabase-js";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
@@ -7,7 +7,7 @@ import { supabase } from "./supabase";
 import "./App.css";
 
 type View = "servers" | "new" | "marketplace" | "crew" | "settings";
-type Theme = "graphite" | "slate" | "ocean" | "forest" | "violet" | "ember" | "light";
+type Theme = "graphite" | "slate" | "ocean" | "forest" | "violet" | "ember" | "light" | "custom";
 type Software = "vanilla" | "paper" | "purpur" | "fabric" | "forge" | "neoforge";
 
 type SystemStatus = {
@@ -32,20 +32,24 @@ type InstalledServer = {
 };
 
 type ProcessStatus = { running: boolean; exitCode?: number };
+type ServerAddress = { lanAddress?: string; port: number };
 type AddonKind = "mod" | "plugin";
 type AddonResult = { id: string; title: string; description: string; iconUrl?: string; downloads: number };
 type InstalledAddon = { name: string; filename: string; directory: string };
 type Profile = { username: string; display_name?: string | null; avatar_url?: string | null };
 type CrewMember = { user_id: string; role: "admin" | "moderator" | "viewer"; permissions?: string[] | null; profiles?: Profile | null };
+type ServerInvite = { token: string; expires_at: string };
 
-const STORAGE_KEY = "howl-host-servers-v1";
+const STORAGE_KEY = "crew-ship-servers-v1";
+const LEGACY_STORAGE_KEY = "howl-host-servers-v1";
 const WELCOME_KEY = "crew-ship-welcome-seen";
 const THEME_KEY = "crew-ship-theme";
+const CUSTOM_THEME_KEY = "crew-ship-custom-theme";
 const DISCORD_CALLBACK_URL = "crewship://auth/callback";
 
 function savedServers(): InstalledServer[] {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY) ?? "[]");
   } catch {
     return [];
   }
@@ -55,12 +59,39 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function colorMix(foreground: string, background: string, amount: number) {
+  const toRgb = (value: string) => [1, 3, 5].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
+  const [fr, fg, fb] = toRgb(foreground);
+  const [br, bg, bb] = toRgb(background);
+  const channel = (front: number, back: number) => Math.round(front * (1 - amount) + back * amount).toString(16).padStart(2, "0");
+  return `#${channel(fr, br)}${channel(fg, bg)}${channel(fb, bb)}`;
+}
+
 function parseDiscordCallback(value: string) {
   try {
     const url = new URL(value);
     return url.protocol === "crewship:" && url.hostname === "auth" && url.pathname === "/callback" ? url : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function parseInviteLink(value: string) {
+  try {
+    const url = new URL(value);
+    const token = url.protocol === "crewship:" && url.hostname === "invite" ? url.searchParams.get("token") : null;
+    return token && /^[0-9a-f-]{36}$/i.test(token) ? token : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function savedCustomTheme() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CUSTOM_THEME_KEY) ?? "{}");
+    return { canvas: parsed.canvas ?? "#222831", paper: parsed.paper ?? "#303841", blue: parsed.blue ?? "#4d8dff", red: parsed.red ?? "#ef5c76" };
+  } catch {
+    return { canvas: "#222831", paper: "#303841", blue: "#4d8dff", red: "#ef5c76" };
   }
 }
 
@@ -79,6 +110,7 @@ function App() {
   const [selectedMemory, setSelectedMemory] = useState("4096");
   const [servers, setServers] = useState<InstalledServer[]>(savedServers);
   const [running, setRunning] = useState<Record<string, boolean>>({});
+  const [addresses, setAddresses] = useState<Record<string, ServerAddress>>({});
   const [busy, setBusy] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
@@ -88,15 +120,18 @@ function App() {
   const [welcomeOpen, setWelcomeOpen] = useState(() => localStorage.getItem(WELCOME_KEY) !== "true");
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem(THEME_KEY);
-    return saved === "light" || saved === "slate" || saved === "ocean" || saved === "forest" || saved === "violet" || saved === "ember" || saved === "graphite" ? saved : "graphite";
+    return saved === "light" || saved === "slate" || saved === "ocean" || saved === "forest" || saved === "violet" || saved === "ember" || saved === "graphite" || saved === "custom" ? saved : "graphite";
   });
+  const [customTheme, setCustomTheme] = useState(savedCustomTheme);
   const [addonKind, setAddonKind] = useState<AddonKind>("mod");
   const [addonQuery, setAddonQuery] = useState("");
   const [addonResults, setAddonResults] = useState<AddonResult[]>([]);
   const [targetServerId, setTargetServerId] = useState("");
   const [crewServerId, setCrewServerId] = useState("");
   const [crewMembers, setCrewMembers] = useState<CrewMember[]>([]);
-  const [moderatorName, setModeratorName] = useState("");
+  const [adminName, setAdminName] = useState("");
+  const [inviteLink, setInviteLink] = useState<string>();
+  const [usernameDraft, setUsernameDraft] = useState("");
 
   const currentLogServer = useMemo(
     () => servers.find((server) => server.id === logsFor),
@@ -119,7 +154,13 @@ function App() {
     if (!("__TAURI_INTERNALS__" in window)) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    const finishDiscordSignIn = async (value: string) => {
+    const handleDeepLink = async (value: string) => {
+      const inviteToken = parseInviteLink(value);
+      if (inviteToken) {
+        localStorage.setItem("crew-ship-pending-invite", inviteToken);
+        if (!disposed) setAuthMessage("Admin invite received. Sign in to accept it.");
+        return;
+      }
       const url = parseDiscordCallback(value);
       if (!url) return;
       const callbackError = url.searchParams.get("error_description") ?? url.searchParams.get("error") ?? undefined;
@@ -132,8 +173,8 @@ function App() {
       const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
       if (!disposed) setAuthMessage(exchangeError ? exchangeError.message : "Discord sign-in complete. Loading your ship…");
     };
-    void getCurrent().then((urls) => Promise.all((urls ?? []).map(finishDiscordSignIn))).catch((cause) => setAuthMessage(errorMessage(cause)));
-    void onOpenUrl((urls) => void Promise.all(urls.map(finishDiscordSignIn))).then((unsubscribe) => { unlisten = unsubscribe; }).catch((cause) => setAuthMessage(errorMessage(cause)));
+    void getCurrent().then((urls) => Promise.all((urls ?? []).map(handleDeepLink))).catch((cause) => setAuthMessage(errorMessage(cause)));
+    void onOpenUrl((urls) => void Promise.all(urls.map(handleDeepLink))).then((unsubscribe) => { unlisten = unsubscribe; }).catch((cause) => setAuthMessage(errorMessage(cause)));
     return () => {
       disposed = true;
       unlisten?.();
@@ -150,7 +191,22 @@ function App() {
       .select("username,display_name,avatar_url")
       .eq("id", user.id)
       .maybeSingle()
-      .then(({ data }) => setProfile(data as Profile | null));
+      .then(({ data }) => {
+        setProfile(data as Profile | null);
+        setUsernameDraft((data as Profile | null)?.username ?? "");
+      });
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const token = localStorage.getItem("crew-ship-pending-invite");
+    if (!token) return;
+    localStorage.removeItem("crew-ship-pending-invite");
+    void supabase.rpc("accept_server_admin_invite", { invite_token: token })
+      .then(({ error: inviteError }) => {
+        if (inviteError) setError(inviteError.message);
+        else setNotice("You are now an admin for the invited server. The host keeps the server files on their computer.");
+      });
   }, [user]);
 
   async function refreshSystem() {
@@ -169,6 +225,8 @@ function App() {
       ] as const),
     );
     setRunning(Object.fromEntries(statuses));
+    const nextAddresses = await Promise.all(servers.map(async (server) => [server.id, await invoke<ServerAddress>("server_address", { id: server.id })] as const));
+    setAddresses(Object.fromEntries(nextAddresses));
   }
 
   useEffect(() => {
@@ -206,6 +264,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(CUSTOM_THEME_KEY, JSON.stringify(customTheme));
+  }, [customTheme]);
 
   async function install(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -253,11 +315,15 @@ function App() {
     setBusy(server.id);
     setError(undefined);
     try {
-      await invoke("start_server", {
+      const status = await invoke<ProcessStatus>("start_server", {
         config: { id: server.id, jarPath: server.jarPath, memoryMb: server.memoryMb, software: server.software ?? "fabric" },
       });
-      setRunning((current) => ({ ...current, [server.id]: true }));
-      setNotice(`${server.name} is starting in the background.`);
+      setRunning((current) => ({ ...current, [server.id]: status.running }));
+      if (status.running) setNotice(`${server.name} is starting. Its LAN IP is ${addresses[server.id]?.lanAddress ?? "loading…"}.`);
+      else {
+        setError(`${server.name} stopped during launch${status.exitCode !== undefined ? ` (exit ${status.exitCode})` : ""}. Open Console to see the loader error.`);
+        setLogsFor(server.id);
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -419,7 +485,7 @@ function App() {
     event.preventDefault();
     const server = servers.find((item) => item.id === crewServerId);
     if (!server?.cloudId) return setError("Sync this server before adding moderators.");
-    const username = moderatorName.trim();
+    const username = adminName.trim();
     if (!username) return;
     setBusy("invite-moderator");
     setError(undefined);
@@ -435,13 +501,13 @@ function App() {
       const { error: inviteError } = await supabase.from("server_access").upsert({
         server_id: server.cloudId,
         user_id: invited.id,
-        role: "moderator",
-        permissions: ["console", "command", "power", "players", "addons", "files", "backups"],
+        role: "admin",
+        permissions: ["console", "command", "power", "players", "addons", "files", "backups", "worlds", "settings"],
       }, { onConflict: "server_id,user_id" });
       if (inviteError) throw inviteError;
-      setModeratorName("");
+      setAdminName("");
       await loadCrew(server);
-      setNotice(`${invited.username} is now a moderator for ${server.name}.`);
+      setNotice(`${invited.username} is now an admin for ${server.name}.`);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -463,6 +529,62 @@ function App() {
     setBusy(undefined);
   }
 
+  async function createAdminInvite() {
+    const server = servers.find((item) => item.id === crewServerId);
+    if (!server?.cloudId || !user) return setError("Sync this server before creating an admin invite.");
+    setBusy("create-invite");
+    setError(undefined);
+    try {
+      const { data, error: inviteError } = await supabase
+        .from("server_invites")
+        .insert({ server_id: server.cloudId, created_by: user.id, role: "admin" })
+        .select("token,expires_at")
+        .single();
+      if (inviteError) throw inviteError;
+      const link = `crewship://invite?token=${(data as ServerInvite).token}`;
+      setInviteLink(link);
+      await navigator.clipboard?.writeText(link);
+      setNotice("One-use admin invite copied. It expires in 7 days.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function deleteServer(server: InstalledServer) {
+    if (!window.confirm(`Delete ${server.name}? This permanently removes its local world, mods, and server files.`)) return;
+    setBusy(`delete-${server.id}`);
+    setError(undefined);
+    try {
+      await invoke("delete_server", { id: server.id });
+      if (server.cloudId) {
+        const { error: cloudError } = await supabase.from("servers").delete().eq("id", server.cloudId);
+        if (cloudError) throw cloudError;
+      }
+      setServers((current) => current.filter((item) => item.id !== server.id));
+      setNotice(`${server.name} and its local files were deleted.`);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function saveUsername(event: FormEvent) {
+    event.preventDefault();
+    const username = usernameDraft.trim();
+    if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) return setError("Username must be 3–24 letters, numbers, or underscores.");
+    setBusy("username");
+    const { data, error: updateError } = await supabase.from("profiles").update({ username, display_name: username }).eq("id", user?.id ?? "").select("username,display_name,avatar_url").single();
+    if (updateError) setError(updateError.message);
+    else {
+      setProfile(data as Profile);
+      setNotice("Crew.Ship username updated.");
+    }
+    setBusy(undefined);
+  }
+
   async function logOut() {
     setBusy("logout");
     const { error: signOutError } = await supabase.auth.signOut();
@@ -478,8 +600,12 @@ function App() {
   if (!authReady) return <div className="auth-loading"><div className="pixel-spinner" /><span>Preparing your ship…</span></div>;
   if (!user) return <LoginScreen externalMessage={authMessage} />;
 
+  const customThemeStyle = theme === "custom" ? {
+    "--canvas": customTheme.canvas, "--paper": customTheme.paper, "--paper-2": colorMix(customTheme.paper, "#ffffff", 0.08), "--ink": "#f7fafc", "--muted": "#b9c2ce", "--line": colorMix(customTheme.paper, "#ffffff", 0.22), "--blue": customTheme.blue, "--blue-dark": colorMix(customTheme.blue, "#ffffff", 0.38), "--blue-soft": colorMix(customTheme.blue, customTheme.paper, 0.16), "--red": customTheme.red, "--red-dark": colorMix(customTheme.red, "#ffffff", 0.28), "--red-soft": colorMix(customTheme.red, customTheme.paper, 0.18), "--green": "#63d6a3"
+  } as CSSProperties : undefined;
+
   return (
-    <div className={`app-shell theme-${theme}`}>
+    <div className={`app-shell theme-${theme}`} style={customThemeStyle}>
       <aside className="sidebar">
         <button className="brand" onClick={() => setView("servers")}>
           <span className="brand-mark"><i /><i /><i /><i /><i /></span>
@@ -524,11 +650,12 @@ function App() {
               {servers.map((server) => <article className="server-card" key={server.id}>
                 <div className="server-main">
                   <span className={`status-dot ${running[server.id] ? "online" : ""}`} />
-                  <div><h3>{server.name}</h3><p>{softwareName(server.software ?? "fabric")} {server.loaderVersion} · Minecraft {server.gameVersion} · {Math.round(server.memoryMb / 1024)} GB · Premium + offline clients</p></div>
+                  <div><h3>{server.name}</h3><p>{softwareName(server.software ?? "fabric")} {server.loaderVersion} · Minecraft {server.gameVersion} · {Math.round(server.memoryMb / 1024)} GB · Premium + offline clients</p><p className="server-ip">{running[server.id] ? `JOIN ON LAN: ${addresses[server.id]?.lanAddress ?? "LOADING…"}` : `LAN IP WHEN RUNNING: ${addresses[server.id]?.lanAddress ?? "CHECKING…"}`}</p></div>
                 </div>
                 <div className="server-actions">
                   {["fabric", "forge", "neoforge"].includes(server.software ?? "fabric") && <button className="ghost" onClick={() => void openMods(server)}>MODS</button>}
                   <button className="ghost" onClick={() => setLogsFor(server.id)}>CONSOLE</button>
+                  <button className="ghost danger-text" disabled={busy === `delete-${server.id}`} onClick={() => void deleteServer(server)}>{busy === `delete-${server.id}` ? "DELETING…" : "DELETE"}</button>
                   <button className={running[server.id] ? "danger-button" : "primary"} disabled={busy === server.id || !system?.javaInstalled} onClick={() => void (running[server.id] ? stop(server) : start(server))}>
                     {busy === server.id ? "WORKING…" : running[server.id] ? "■ STOP" : "▶ START"}
                   </button>
@@ -566,18 +693,20 @@ function App() {
           </>}
 
           {view === "crew" && <>
-            <PageTitle title="Crew access" subtitle="Give trusted people moderator access to one server at a time." action={<button className="primary" disabled={!servers.length || busy === "crew-sync"} onClick={() => void syncAllServers()}>{busy === "crew-sync" ? "SYNCING…" : "SYNC LOCAL SERVERS"}</button>} />
+            <PageTitle title="Crew access" subtitle="Give trusted people admin access to one server at a time." action={<button className="primary" disabled={!servers.length || busy === "crew-sync"} onClick={() => void syncAllServers()}>{busy === "crew-sync" ? "SYNCING…" : "SYNC LOCAL SERVERS"}</button>} />
             {!servers.length ? <EmptyState onCreate={() => setView("new")} /> : <div className="crew-layout">
               <section className="crew-control-card">
                 <div className="card-heading"><span>SERVER</span><Pill ok={Boolean(servers.find((item) => item.id === crewServerId)?.cloudId)} /></div>
                 <ChoicePicker value={crewServerId || servers[0]?.id || ""} onChange={setCrewServerId} options={servers.map((server) => ({ value: server.id, label: `${server.name} · ${softwareName(server.software ?? "fabric")}` }))} placeholder="Choose a server" />
                 <div className="owner-row"><span className="crew-avatar captain">{(profile?.username ?? "C").slice(0, 2).toUpperCase()}</span><div><strong>{profile?.username ?? "You"}</strong><small>OWNER · FULL ACCESS</small></div></div>
-                <form className="moderator-form" onSubmit={addModerator}><label><span>ADD MODERATOR BY USERNAME</span><div><input value={moderatorName} onChange={(event) => setModeratorName(event.target.value)} placeholder="minecraft_friend" /><button className="primary" disabled={busy === "invite-moderator" || !servers.find((item) => item.id === crewServerId)?.cloudId}>{busy === "invite-moderator" ? "ADDING…" : "ADD MODERATOR"}</button></div></label></form>
-                {!servers.find((item) => item.id === crewServerId)?.cloudId && <p className="crew-hint">Sync local servers first. This creates the secure access record used by moderators.</p>}
+                <form className="moderator-form" onSubmit={addModerator}><label><span>ADD ADMIN BY USERNAME</span><div><input value={adminName} onChange={(event) => setAdminName(event.target.value)} placeholder="minecraft_friend" /><button className="primary" disabled={busy === "invite-moderator" || !servers.find((item) => item.id === crewServerId)?.cloudId}>{busy === "invite-moderator" ? "ADDING…" : "ADD ADMIN"}</button></div></label></form>
+                <button className="ghost invite-link-button" disabled={busy === "create-invite" || !servers.find((item) => item.id === crewServerId)?.cloudId} onClick={() => void createAdminInvite()}>{busy === "create-invite" ? "CREATING LINK…" : "COPY ADMIN INVITE LINK"}</button>
+                {inviteLink && <input className="invite-link" readOnly value={inviteLink} aria-label="One-use admin invite link" onFocus={(event) => event.currentTarget.select()} />}
+                {!servers.find((item) => item.id === crewServerId)?.cloudId && <p className="crew-hint">Sync local servers first. This creates the secure access record used by admins.</p>}
               </section>
               <section className="crew-members-card">
-                <div className="crew-members-heading"><div><span className="eyebrow">CURRENT ACCESS</span><h2>Server crew</h2></div><span className="member-count">{crewMembers.length} MODERATOR{crewMembers.length === 1 ? "" : "S"}</span></div>
-                {crewMembers.length ? <div className="crew-member-list">{crewMembers.map((member) => <article key={member.user_id}><span className="crew-avatar">{(member.profiles?.username ?? "?").slice(0, 2).toUpperCase()}</span><div><strong>{member.profiles?.display_name || member.profiles?.username || "Unknown player"}</strong><small>@{member.profiles?.username ?? "unknown"} · {member.role.toUpperCase()}</small></div><span className="permission-summary">POWER · CONSOLE · PLAYERS · ADD-ONS</span><button className="ghost danger-text" disabled={busy === `remove-${member.user_id}`} onClick={() => void removeModerator(member)}>REMOVE</button></article>)}</div> : <div className="crew-empty"><span>♟</span><h3>No moderators yet</h3><p>Add someone by their Crew.Ship username. They need an account first.</p></div>}
+                <div className="crew-members-heading"><div><span className="eyebrow">CURRENT ACCESS</span><h2>Server crew</h2></div><span className="member-count">{crewMembers.length} ADMIN{crewMembers.length === 1 ? "" : "S"}</span></div>
+                {crewMembers.length ? <div className="crew-member-list">{crewMembers.map((member) => <article key={member.user_id}><span className="crew-avatar">{(member.profiles?.username ?? "?").slice(0, 2).toUpperCase()}</span><div><strong>{member.profiles?.display_name || member.profiles?.username || "Unknown player"}</strong><small>@{member.profiles?.username ?? "unknown"} · {member.role.toUpperCase()}</small></div><span className="permission-summary">POWER · CONSOLE · PLAYERS · ADD-ONS</span><button className="ghost danger-text" disabled={busy === `remove-${member.user_id}`} onClick={() => void removeModerator(member)}>REMOVE</button></article>)}</div> : <div className="crew-empty"><span>♟</span><h3>No admins yet</h3><p>Add someone by username or send a one-use Crew.Ship invite link.</p></div>}
               </section>
             </div>}
           </>}
@@ -585,10 +714,10 @@ function App() {
           {view === "settings" && <>
             <PageTitle title="Host settings" subtitle="System checks and tunnel controls for this computer." />
             <div className="settings-grid">
-              <section className="settings-card wide appearance-card"><div className="card-heading"><span>APPEARANCE</span><Pill ok /></div><h3>Choose your ship colors</h3><p>True neutral gray is the default. Pick a completely different mood whenever you want—the whole app updates instantly.</p><div className="theme-picker"><ThemeChoice theme="graphite" current={theme} label="True Gray" colors={["#181818", "#5d91f4", "#df596a"]} onSelect={setTheme} /><ThemeChoice theme="slate" current={theme} label="Cool Slate" colors={["#1b1e23", "#78a7ff", "#ef7180"]} onSelect={setTheme} /><ThemeChoice theme="ocean" current={theme} label="Deep Ocean" colors={["#0e151b", "#35a7ff", "#ff667d"]} onSelect={setTheme} /><ThemeChoice theme="forest" current={theme} label="Forest" colors={["#101a15", "#56c596", "#e2a84b"]} onSelect={setTheme} /><ThemeChoice theme="violet" current={theme} label="Ender" colors={["#171221", "#a77bff", "#ff628e"]} onSelect={setTheme} /><ThemeChoice theme="ember" current={theme} label="Nether" colors={["#1e1311", "#ff9d45", "#ef4c57"]} onSelect={setTheme} /><ThemeChoice theme="light" current={theme} label="Snow" colors={["#ffffff", "#245eea", "#d93f53"]} onSelect={setTheme} /></div></section>
+              <section className="settings-card wide appearance-card"><div className="card-heading"><span>APPEARANCE</span><Pill ok /></div><h3>Choose your ship colors</h3><p>True neutral gray is the default. Pick a completely different mood whenever you want—the whole app updates instantly.</p><div className="theme-picker"><ThemeChoice theme="graphite" current={theme} label="True Gray" colors={["#181818", "#5d91f4", "#df596a"]} onSelect={setTheme} /><ThemeChoice theme="slate" current={theme} label="Cool Slate" colors={["#1b1e23", "#78a7ff", "#ef7180"]} onSelect={setTheme} /><ThemeChoice theme="ocean" current={theme} label="Deep Ocean" colors={["#0e151b", "#35a7ff", "#ff667d"]} onSelect={setTheme} /><ThemeChoice theme="forest" current={theme} label="Forest" colors={["#101a15", "#56c596", "#dc6075"]} onSelect={setTheme} /><ThemeChoice theme="violet" current={theme} label="Ender" colors={["#171221", "#a77bff", "#ff628e"]} onSelect={setTheme} /><ThemeChoice theme="ember" current={theme} label="Nether" colors={["#1e1311", "#ff9d45", "#ef4c57"]} onSelect={setTheme} /><ThemeChoice theme="light" current={theme} label="Snow" colors={["#ffffff", "#245eea", "#d93f53"]} onSelect={setTheme} /><ThemeChoice theme="custom" current={theme} label="Your colors" colors={[customTheme.canvas, customTheme.blue, customTheme.red]} onSelect={setTheme} /></div><div className="custom-theme-controls"><label>BACKGROUND<input type="color" value={customTheme.canvas} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, canvas: event.target.value })); }} /></label><label>PANEL<input type="color" value={customTheme.paper} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, paper: event.target.value })); }} /></label><label>BLUE<input type="color" value={customTheme.blue} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, blue: event.target.value })); }} /></label><label>RED<input type="color" value={customTheme.red} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, red: event.target.value })); }} /></label></div></section>
               <section className="settings-card"><div className="card-heading"><span>JAVA RUNTIME</span><Pill ok={Boolean(system?.javaInstalled)} /></div><h3>{system?.javaInstalled ? "Ready" : "Java not found"}</h3><p>{system?.javaVersion ?? "Install Java 21 or newer to run recent Minecraft versions."}</p><button className="ghost" onClick={() => void openUrl("https://adoptium.net/temurin/releases/")}>GET JAVA ↗</button></section>
               <section className="settings-card"><div className="card-heading"><span>PUBLIC TUNNEL</span><Pill ok={playitRunning} /></div><h3>{playitRunning ? "Tunnel running" : "Playit.gg ready"}</h3><p>{system?.playitPath ?? "The official playit.gg agent downloads automatically the first time you start the tunnel."}</p><div className="button-row"><button className="primary" disabled={busy === "playit"} onClick={() => void togglePlayit()}>{busy === "playit" ? "PREPARING…" : playitRunning ? "STOP TUNNEL" : system?.playitInstalled ? "START TUNNEL" : "DOWNLOAD & START"}</button><button className="ghost" onClick={() => void openUrl("https://playit.gg")}>PLAYIT ACCOUNT ↗</button></div></section>
-              <section className="settings-card"><div className="card-heading"><span>CREW ACCOUNT</span><Pill ok /></div><h3>{profile?.display_name || profile?.username || "Signed in"}</h3><p>{user.email} · Manage moderators directly from Crew access.</p><div className="button-row"><button className="primary" onClick={() => setView("crew")}>MANAGE CREW</button><button className="ghost" onClick={() => void logOut()}>LOG OUT</button></div></section>
+              <section className="settings-card"><div className="card-heading"><span>CREW.SHIP ACCOUNT</span><Pill ok /></div><h3>{profile?.display_name || profile?.username || "Signed in"}</h3><p>{user.email} · Change your username or manage server admins.</p><form className="username-form" onSubmit={saveUsername}><input value={usernameDraft} onChange={(event) => setUsernameDraft(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" aria-label="Crew.Ship username" /><button className="ghost" disabled={busy === "username"}>{busy === "username" ? "SAVING…" : "SAVE NAME"}</button></form><div className="button-row"><button className="primary" onClick={() => setView("crew")}>MANAGE ADMINS</button><button className="ghost" onClick={() => void logOut()}>LOG OUT</button></div></section>
               <section className="settings-card wide"><div className="card-heading"><span>SERVER STORAGE & ADD-ONS</span><Pill ok /></div><h3>Owned by your crew</h3><p className="mono">{system?.dataDirectory ?? "Loading…"}</p><p>Use Marketplace for one-click installs. Fabric, Forge, and NeoForge use mods; Paper and Purpur use plugins. Stop the server before changing a large modpack.</p></section>
             </div>
           </>}
