@@ -1,6 +1,6 @@
 [package]
 name = "crew-ship"
-version = "0.5.0"
+version = "0.5.1"
 description = "Run Crew.Ship Minecraft servers on this computer"
 authors = ["Crew.Ship"]
 edition = "2021"
