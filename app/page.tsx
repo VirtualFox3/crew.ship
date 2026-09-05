@@ -1,23 +1,34 @@
+import type { Metadata } from "next";
 import Link from "next/link";
-import { getUser } from "@/lib/supabase/server";
-import { isConfigured } from "@/lib/env";
+import s from "./landing.module.css";
 
-export const dynamic = "force-dynamic";
+export const metadata: Metadata = { title: "Crew.Ship — Local Minecraft server hosting", description: "Host it. Own it. Crew it. Run your Minecraft server on your own computer with Crew.Ship.", icons: { icon: "/favicon.ico" } };
 
-export default async function LandingPage() {
-  const user = isConfigured() ? await getUser() : null;
-  return <main className="min-h-screen bg-[#f0f1f3] text-[#1c2029]">
-    <header className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8"><Link href="/" className="flex items-center gap-3"><PixelShip compact /><b className="font-mono text-sm tracking-[.14em]">CREW.SHIP</b></Link><nav className="hidden gap-7 font-mono text-[11px] font-bold tracking-[.08em] text-[#596173] md:flex"><a href="#how">HOW IT WORKS</a><a href="#features">FEATURES</a><Link href="/download">DOWNLOAD</Link></nav><div className="flex items-center gap-4 font-mono text-[11px] font-bold"><Link href={user ? "/dashboard" : "/login"}>LOG IN</Link><Link href="/download" className="bg-[#2d61dc] px-4 py-3 text-white shadow-[4px_4px_0_#dc5367]">GET THE APP</Link></div></header>
+const steps = [
+  ["Create", "Pick Vanilla, Paper, Purpur, Fabric, Forge, or NeoForge. Crew.Ship gets the official build."],
+  ["Run locally", "Your world uses your computer, your storage, and your own Minecraft server folder."],
+  ["Share", "Invite admins by Crew.Ship username or a single-use link. Use playit.gg for a public address."],
+];
+const features = [
+  ["Server options", "Slots, whitelist, difficulty, keep inventory, resource packs, and more."],
+  ["Marketplace", "Install compatible mods and plugins through Modrinth."],
+  ["Files & worlds", "Open local folders whenever you need full control of your data."],
+  ["Console & crew", "Console, logs, player controls, backups, and access invites."],
+];
 
-    <section className="relative mx-auto grid max-w-7xl gap-10 overflow-hidden px-5 pb-14 pt-9 sm:px-8 lg:grid-cols-[1.07fr_.93fr] lg:items-center lg:pb-24 lg:pt-16"><div className="absolute right-[-100px] top-[-150px] size-[500px] border-[42px] border-[#2d61dc]/10" /><div className="relative"><p className="inline-flex items-center gap-3 border border-[#c7ccd6] bg-white px-3 py-2 font-mono text-[10px] font-bold tracking-[.12em]"><span className="size-2 bg-[#51d092] shadow-[0_0_0_3px_#dff7eb]" />MINECRAFT, ON YOUR COMPUTER</p><h1 className="mt-7 max-w-3xl font-mono text-5xl font-black leading-[.87] tracking-[-.09em] sm:text-7xl lg:text-[88px]">HOST IT.<br />OWN IT.<br /><span className="text-[#2d61dc]">CREW IT.</span></h1><p className="mt-7 max-w-xl text-base leading-relaxed text-[#5b6576]">Crew.Ship is a native Minecraft host for the PC you already have. Create a world, install add-ons, share access with your crew, and keep every file right where it belongs.</p><div className="mt-8 flex flex-wrap gap-4"><Link href="/download" className="bg-[#2d61dc] px-6 py-4 font-mono text-sm font-black text-white shadow-[7px_7px_0_#dc5367] transition-transform hover:-translate-y-1">DOWNLOAD FOR WINDOWS</Link><Link href={user ? "/dashboard" : "/login"} className="border border-[#1c2029] bg-white px-5 py-3.5 font-mono text-sm font-bold">OPEN WEB PANEL</Link></div></div><div className="relative mx-auto w-full max-w-[480px] border-2 border-[#1c2029] bg-[#22252d] p-5 shadow-[12px_12px_0_#dc5367]"><div className="flex items-center justify-between border-b border-white/15 pb-4 font-mono text-[10px] text-[#cfd8e9]"><span>CREW.SHIP DESKTOP</span><span className="text-[#65db9f]">● ONLINE</span></div><div className="grid place-items-center py-10"><PixelShip /></div><div className="grid grid-cols-3 border border-white/10 font-mono"><Fact value="LOCAL" label="HOST" /><Fact value="6" label="SOFTWARES" /><Fact value="FREE" label="TO USE" /></div></div></section>
-
-    <section id="how" className="border-y border-[#c7ccd6] bg-white"><div className="mx-auto grid max-w-7xl divide-y divide-[#c7ccd6] px-5 sm:px-8 md:grid-cols-3 md:divide-x md:divide-y-0"><Step number="01" title="Create" text="Pick Vanilla, Paper, Purpur, Fabric, Forge, or NeoForge. Crew.Ship gets the official build." /><Step number="02" title="Run locally" text="Your world uses your computer, your storage, and your own Minecraft server folder." /><Step number="03" title="Share" text="Invite admins by Crew.Ship username or a single-use link. Use playit.gg for a public address." /></div></section>
-    <section id="features" className="mx-auto max-w-7xl px-5 py-16 sm:px-8"><p className="font-mono text-[10px] font-bold tracking-[.14em] text-[#2d61dc]">BUILT FOR A LOCAL HOST</p><h2 className="mt-3 max-w-3xl font-mono text-3xl font-black tracking-[-.07em] sm:text-5xl">Your server has a real control room.</h2><div className="mt-9 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Feature title="Server options" text="Slots, whitelist, difficulty, keep inventory, resource packs, and more." /><Feature title="Marketplace" text="One-click compatible mods and plugins through Modrinth." /><Feature title="Files & worlds" text="Open local folders whenever you need full control of your data." /><Feature title="Console & crew" text="Live console, logs, player controls, backups, and secure access invites." /></div></section>
-    <footer className="bg-[#1c2029] px-5 py-8 text-[#dfe7f5] sm:px-8"><div className="mx-auto flex max-w-7xl flex-wrap justify-between gap-4 font-mono text-[10px] tracking-[.11em]"><span>CREW.SHIP · LOCAL MINECRAFT HOSTING</span><a href="https://github.com/VirtualFox3/Crew.Ship" className="text-[#9dbaff]">GITHUB ↗</a></div></footer>
+export default function LandingPage() {
+  return <main className={s.page}>
+    <a href="#main" className={s.skip}>Skip to content</a>
+    <header className={s.header}>
+      <Link href="/" className={s.brand}><img src="/brand/ship.svg" width="48" height="48" alt="" />Crew.Ship</Link>
+      <nav aria-label="Main navigation"><a href="#how">How it works</a><a href="#features">Features</a><Link href="/download">Download</Link></nav>
+      <div className={s.account}><Link href="/login">Log in</Link><Link href="/download" className={s.smallButton}>Get the app</Link></div>
+    </header>
+    <section className={s.hero} id="main">
+      <div><p className={s.eyebrow}><span /> Minecraft, on your computer</p><h1>Host it.<br />Own it.<br />Crew it.</h1><p className={s.description}>Crew.Ship is a native Minecraft host for the PC you already have. Create a world, install add-ons, share access with your crew, and keep every file right where it belongs.</p><div className={s.actions}><Link href="/download" className={s.primary}>Download for Windows <span aria-hidden="true">↓</span></Link><Link href="/login" className={s.secondary}>Open web panel</Link></div><p className={s.note}>Windows 10 / 11 · Your PC stays on while you host.</p></div>
+    </section>
+    <section id="how" className={s.steps} aria-label="How it works">{steps.map(([title, text], index) => <article key={title}><span className={s.stepNumber}>0{index + 1}</span><h2>{title}</h2><p>{text}</p></article>)}</section>
+    <section id="features" className={s.features}><div className={s.featureHeading}><div><p className={s.eyebrow}>Built for a local host</p><h2>Your server has<br />a real control room.</h2></div><p>The tools to make it yours.<br />The freedom to keep it yours.</p></div><div className={s.featureGrid}>{features.map(([title, text], i) => <article key={title}><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d={['M4 7h16M4 17h16M8 4v6M16 14v6','M4 8l8-4 8 4v10l-8 4-8-4V8zm0 0l8 4 8-4m-8 4v10','M3 6h7l2 3h9v11H3V6z','M4 6l5 5-5 5m8 1h8'][i]} /></svg><h3>{title}</h3><p>{text}</p></article>)}</div></section>
+    <footer className={s.footer}><Link href="/" className={s.brand}><img src="/brand/ship.svg" width="38" height="38" alt="" />Crew.Ship</Link><p>Local Minecraft hosting.<br /><span>Independent project. Not affiliated with Mojang or Microsoft.</span></p><a href="https://github.com/VirtualFox3/Crew.Ship">GitHub ↗</a></footer>
   </main>;
 }
-
-function PixelShip({ compact = false }: { compact?: boolean }) { const size = compact ? "scale-[.48] origin-left" : "scale-100"; return <span aria-hidden="true" className={`relative block h-24 w-28 ${size}`}><i className="absolute bottom-2 left-3 h-3 w-20 bg-[#f4f5f7] shadow-[6px_6px_0_#2d61dc,12px_6px_0_#f4f5f7,18px_6px_0_#f4f5f7,24px_6px_0_#f4f5f7,30px_6px_0_#f4f5f7,36px_6px_0_#f4f5f7,42px_6px_0_#f4f5f7]" /><i className="absolute bottom-0 left-8 h-1.5 w-14 bg-[#2d61dc]" /><i className="absolute left-[51px] top-2 h-16 w-2 bg-[#f4f5f7]" /><i className="absolute left-[59px] top-3 h-8 w-10 bg-[#dc5367]" /><i className="absolute left-4 top-7 h-10 w-9 bg-[#2d61dc]" /><i className="absolute left-7 top-10 h-3 w-3 bg-[#d9e7ff]" /></span>; }
-function Fact({ value, label }: { value: string; label: string }) { return <div className="p-4"><b className="text-lg text-white">{value}</b><p className="mt-1 text-[8px] tracking-[.12em] text-[#a1adbe]">{label}</p></div>; }
-function Step({ number, title, text }: { number: string; title: string; text: string }) { return <article className="px-0 py-7 md:px-7"><span className="font-mono text-[10px] font-bold text-[#dc5367]">{number}</span><h2 className="mt-3 font-mono text-xl font-black tracking-[-.06em]">{title}</h2><p className="mt-3 text-sm leading-relaxed text-[#626d7e]">{text}</p></article>; }
-function Feature({ title, text }: { title: string; text: string }) { return <article className="border border-[#c7ccd6] bg-white p-5 shadow-[4px_4px_0_#d4d8e1]"><h3 className="font-mono text-base font-black tracking-[-.04em]">{title}</h3><p className="mt-3 text-sm leading-relaxed text-[#626d7e]">{text}</p></article>; }

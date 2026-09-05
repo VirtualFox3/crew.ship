@@ -10,6 +10,8 @@ const PROTECTED = ["/dashboard", "/server", "/account"];
  */
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
+  const publicPath = request.nextUrl.pathname;
+  if (publicPath === "/" || publicPath.startsWith("/download") || publicPath.startsWith("/brand/") || publicPath.startsWith("/fonts/")) return response;
 
   // A fresh clone with no Supabase project yet still serves the marketing site.
   if (!isConfigured()) return response;

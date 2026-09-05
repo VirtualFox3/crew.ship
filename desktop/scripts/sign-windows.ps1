@@ -4,7 +4,8 @@ if ([string]::IsNullOrWhiteSpace($env:CREW_SHIP_CODE_SIGN_PFX_BASE64) -or [strin
   throw "CREW_SHIP_CODE_SIGN_PFX_BASE64 and CREW_SHIP_CODE_SIGN_PFX_PASSWORD are required."
 }
 
-$certificatePath = Join-Path $env:RUNNER_TEMP "howl-host-signing.pfx"
+$certificatePath = Join-Path $env:RUNNER_TEMP ("crew-ship-signing-" + [guid]::NewGuid().ToString("N") + ".pfx")
+try {
 [Convert]::FromBase64String($env:CREW_SHIP_CODE_SIGN_PFX_BASE64) | Set-Content -Path $certificatePath -AsByteStream
 
 $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter "signtool.exe" |
@@ -22,4 +23,8 @@ foreach ($artifact in $artifacts) {
   if ($LASTEXITCODE -ne 0) { throw "Signature verification failed for $($artifact.Name)." }
 }
 
-Remove-Item -LiteralPath $certificatePath -Force
+} finally {
+  if (Test-Path -LiteralPath $certificatePath) {
+    Remove-Item -LiteralPath $certificatePath -Force
+  }
+}

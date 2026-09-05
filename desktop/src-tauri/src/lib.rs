@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+mod runtime;
 use serde_json::Value;
 use std::{
     collections::{HashMap, VecDeque},
@@ -36,6 +37,8 @@ struct ManagedServer {
     child: Child,
     stdin: Option<ChildStdin>,
     logs: Arc<Mutex<VecDeque<String>>>,
+    ready: Arc<std::sync::atomic::AtomicBool>,
+    stopping: bool,
 }
 
 #[derive(Serialize)]
@@ -67,12 +70,14 @@ struct StartConfig {
     jar_path: String,
     memory_mb: u32,
     software: String,
+    game_version: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProcessStatus {
     running: bool,
+    ready: bool,
     exit_code: Option<i32>,
 }
 
@@ -80,6 +85,7 @@ struct ProcessStatus {
 #[serde(rename_all = "camelCase")]
 struct ServerAddress {
     lan_address: Option<String>,
+    public_address: Option<String>,
     port: u16,
 }
 
@@ -148,6 +154,16 @@ fn hidden(command: &mut Command) -> &mut Command {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
     command
+}
+
+fn java_for_game(game: &str) -> Result<PathBuf, String> {
+    let major = runtime::required_java(game)?;
+    for path in runtime::java_candidates(major) {
+        if let Some(output) = command_output(&path.to_string_lossy(), &["-version"]) {
+            if runtime::java_major(&output) == Some(major) { return Ok(path); }
+        }
+    }
+    Err(format!("Minecraft {game} needs Java {major}. Install the 64-bit Java {major} runtime, then retry. Crew.Ship will find it automatically; it will not use an incompatible Java version."))
 }
 
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
@@ -608,7 +624,7 @@ fn install_server(
     fs::write(&download_path, &bytes)
         .map_err(|error| format!("Could not save the server: {error}"))?;
     let launch_path = if needs_installer {
-        let mut installer = Command::new("java");
+        let mut installer = Command::new(java_for_game(&game_version)?);
         hidden(&mut installer);
         let status = installer
             .current_dir(&directory)
@@ -749,16 +765,29 @@ fn server_address(app: AppHandle, id: String) -> Result<ServerAddress, String> {
     let port = server_port(&properties);
     Ok(ServerAddress {
         lan_address: local_ip().map(|address| format!("{address}:{port}")),
+        public_address: fs::read_to_string(properties.with_file_name(".crewship-public-address"))
+            .ok().and_then(|v| runtime::public_address(&v).ok()).filter(|v| !v.is_empty()),
         port,
     })
+}
+
+#[tauri::command]
+fn save_public_address(app: AppHandle, id: String, address: String) -> Result<(), String> {
+    safe_id(&id)?;
+    let address = runtime::public_address(&address)?;
+    let directory = app_servers_dir(&app)?.join(id);
+    if !directory.is_dir() { return Err("Server folder is missing.".into()); }
+    fs::write(directory.join(".crewship-public-address"), address).map_err(|e| e.to_string())
 }
 
 fn read_log_stream<R: std::io::Read + Send + 'static>(
     reader: R,
     logs: Arc<Mutex<VecDeque<String>>>,
+    ready: Arc<std::sync::atomic::AtomicBool>,
 ) {
     thread::spawn(move || {
         for line in BufReader::new(reader).lines().map_while(Result::ok) {
+            if runtime::ready_line(&line) { ready.store(true, std::sync::atomic::Ordering::Relaxed); }
             if let Ok(mut buffer) = logs.lock() {
                 if buffer.len() >= 1_000 {
                     buffer.pop_front();
@@ -814,14 +843,17 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
             .map_err(|error| error.to_string())?
             .is_none()
         {
+            if existing.stopping { return Err("The server is still stopping. Wait for it to finish saving.".into()); }
             return Ok(ProcessStatus {
                 running: true,
+                ready: existing.ready.load(std::sync::atomic::Ordering::Relaxed),
                 exit_code: None,
             });
         }
         servers.remove(&config.id);
     }
 
+    let java_path = java_for_game(&config.game_version)?;
     let installer_platform = matches!(config.software.as_str(), "forge" | "neoforge");
     let mut command = if installer_platform {
         fs::write(
@@ -836,7 +868,7 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         #[cfg(windows)]
         {
             if let Some(arguments) = loader_argument_file(directory, "run.bat") {
-                let mut java = Command::new("java");
+                let mut java = Command::new(&java_path);
                 java.args(["@user_jvm_args.txt", &arguments, "nogui"]);
                 java
             } else {
@@ -874,13 +906,19 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
             script
         }
     } else {
-        let mut java = Command::new("java");
+        let mut java = Command::new(&java_path);
         java.arg(format!("-Xms{}M", config.memory_mb.min(1_024)))
             .arg(format!("-Xmx{}M", config.memory_mb))
             .args(["-jar", launch_path.to_string_lossy().as_ref(), "nogui"]);
         java
     };
     hidden(&mut command);
+    if let Some(bin) = java_path.parent() {
+        let mut paths = vec![bin.to_path_buf()];
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+        if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
+        if let Some(home) = bin.parent() { command.env("JAVA_HOME", home); }
+    }
     command
         .current_dir(directory)
         .stdin(Stdio::piped())
@@ -894,11 +932,12 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
     let logs = Arc::new(Mutex::new(VecDeque::from([
         "[Crew.Ship] Starting Minecraft in the background…".to_owned(),
     ])));
+    let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
     if let Some(stdout) = child.stdout.take() {
-        read_log_stream(stdout, Arc::clone(&logs));
+        read_log_stream(stdout, Arc::clone(&logs), Arc::clone(&ready));
     }
     if let Some(stderr) = child.stderr.take() {
-        read_log_stream(stderr, Arc::clone(&logs));
+        read_log_stream(stderr, Arc::clone(&logs), Arc::clone(&ready));
     }
 
     let keep_inventory = fs::read_to_string(directory.join(".crewship-settings.json"))
@@ -906,21 +945,24 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         .and_then(|value| serde_json::from_str::<Value>(&value).ok())
         .and_then(|value| value.get("keepInventory").and_then(Value::as_bool))
         .unwrap_or(false);
-    servers.insert(config.id.clone(), ManagedServer { child, stdin, logs: Arc::clone(&logs) });
+    servers.insert(config.id.clone(), ManagedServer { child, stdin, logs: Arc::clone(&logs), ready: Arc::clone(&ready), stopping: false });
     // Let launchers report an immediate configuration or Java failure instead
     // of claiming the world is running. The console remains available in either
     // case, so users can see the real loader error.
     thread::sleep(Duration::from_millis(700));
     let managed = servers.get_mut(&config.id).ok_or("Server state disappeared.")?;
-    let exit_code = managed.child.try_wait().map_err(|error| error.to_string())?.and_then(|status| status.code());
-    if exit_code.is_none() {
+    let exit_status = managed.child.try_wait().map_err(|error| error.to_string())?;
+    let running = exit_status.is_none();
+    let exit_code = exit_status.and_then(|status| status.code());
+    if running {
         if let Some(stdin) = managed.stdin.as_mut() {
             let _ = stdin.write_all(format!("gamerule keepInventory {keep_inventory}\n").as_bytes());
             let _ = stdin.flush();
         }
     }
     Ok(ProcessStatus {
-        running: exit_code.is_none(),
+        running,
+        ready: running && ready.load(std::sync::atomic::Ordering::Relaxed),
         exit_code,
     })
 }
@@ -1082,12 +1124,14 @@ fn server_status(id: String, state: State<'_, HostState>) -> Result<ProcessStatu
     let Some(server) = servers.get_mut(&id) else {
         return Ok(ProcessStatus {
             running: false,
+            ready: false,
             exit_code: None,
         });
     };
     let exit = server.child.try_wait().map_err(|error| error.to_string())?;
     Ok(ProcessStatus {
         running: exit.is_none(),
+        ready: exit.is_none() && !server.stopping && server.ready.load(std::sync::atomic::Ordering::Relaxed),
         exit_code: exit.and_then(|status| status.code()),
     })
 }
@@ -1103,37 +1147,28 @@ fn server_logs(id: String, state: State<'_, HostState>) -> Result<Vec<String>, S
 }
 
 #[tauri::command]
-fn stop_server(id: String, state: State<'_, HostState>) -> Result<ProcessStatus, String> {
-    let mut server = {
-        let mut servers = state.servers.lock().map_err(|_| "State lock failed.")?;
-        let Some(server) = servers.remove(&id) else {
-            return Ok(ProcessStatus {
-                running: false,
-                exit_code: None,
-            });
-        };
-        server
-    };
-
-    if let Some(mut stdin) = server.stdin.take() {
-        let _ = stdin.write_all(b"stop\n");
-        let _ = stdin.flush();
-    }
-    for _ in 0..30 {
-        if let Some(exit) = server.child.try_wait().map_err(|error| error.to_string())? {
-            return Ok(ProcessStatus {
-                running: false,
-                exit_code: exit.code(),
-            });
+async fn stop_server(id: String, app: AppHandle) -> Result<ProcessStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<HostState>();
+        for attempt in 0..120 {
+            {
+                let mut servers = state.servers.lock().map_err(|_| "State lock failed.")?;
+                let Some(server) = servers.get_mut(&id) else {
+                    return Ok(ProcessStatus { running: false, ready: false, exit_code: None });
+                };
+                if let Some(exit) = server.child.try_wait().map_err(|e| e.to_string())? {
+                    return Ok(ProcessStatus { running: false, ready: false, exit_code: exit.code() });
+                }
+                if attempt == 0 && !server.stopping {
+                    let stdin = server.stdin.as_mut().ok_or("The server console is unavailable; no forced stop was performed.")?;
+                    stdin.write_all(b"stop\n").and_then(|_| stdin.flush()).map_err(|e| e.to_string())?;
+                    server.stopping = true;
+                }
+            }
+            thread::sleep(Duration::from_millis(500));
         }
-        thread::sleep(Duration::from_millis(500));
-    }
-    server.child.kill().map_err(|error| error.to_string())?;
-    let exit = server.child.wait().map_err(|error| error.to_string())?;
-    Ok(ProcessStatus {
-        running: false,
-        exit_code: exit.code(),
-    })
+        Err("The server is still saving after 60 seconds. It has NOT been force-killed. Check Console and wait before retrying.".into())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1223,6 +1258,7 @@ pub fn run() {
             server_settings,
             save_server_settings,
             server_address,
+            save_public_address,
             start_server,
             stop_server,
             send_server_command,

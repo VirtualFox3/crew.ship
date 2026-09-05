@@ -26,24 +26,21 @@ def rect(draw: ImageDraw.ImageDraw, color: str, *box: int) -> None:
 
 
 def master() -> Image.Image:
-    image = Image.new("RGBA", (PIXEL, PIXEL), PALETTE["void"])
+    image = Image.new("RGBA", (PIXEL, PIXEL), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    # Pixel frame
-    rect(draw, "edge", 1, 1, 30, 2); rect(draw, "edge", 1, 29, 30, 30)
-    rect(draw, "edge", 1, 1, 2, 30); rect(draw, "edge", 29, 1, 30, 30)
-    # Water, a hard horizon that keeps the silhouette readable at 32px.
-    rect(draw, "blue", 6, 26, 25, 27); rect(draw, "blue_light", 10, 28, 21, 28)
-    # Hull: three stepped rows, bow and stern deliberately squared.
-    rect(draw, "edge", 6, 20, 25, 21); rect(draw, "edge", 7, 22, 24, 23)
-    rect(draw, "edge", 9, 24, 22, 24)
-    rect(draw, "white", 8, 20, 23, 20); rect(draw, "white", 9, 21, 22, 21)
-    rect(draw, "white", 10, 22, 21, 22)
-    # Mast, boom, and two block sails.
-    rect(draw, "mast", 15, 5, 16, 20); rect(draw, "mast", 8, 9, 23, 10)
-    rect(draw, "blue", 8, 11, 14, 17); rect(draw, "blue", 9, 18, 14, 18)
-    rect(draw, "blue_light", 9, 12, 11, 13)
-    rect(draw, "red", 17, 8, 22, 15); rect(draw, "red", 17, 16, 24, 17)
-    rect(draw, "red", 17, 5, 20, 7)  # pennant
+    # Three flat colors. Even grid steps remain legible at 16px.
+    # A blue stepped hull, white sail/mast, and a single coral pennant.
+    draw.rectangle((14, 4, 15, 21), fill="#f4f4f4")
+    draw.rectangle((16, 4, 23, 7), fill="#df596a")
+    draw.rectangle((10, 10, 11, 13), fill="#f4f4f4")
+    draw.rectangle((8, 14, 11, 17), fill="#f4f4f4")
+    draw.rectangle((6, 18, 11, 19), fill="#f4f4f4")
+    draw.rectangle((18, 10, 19, 13), fill="#f4f4f4")
+    draw.rectangle((18, 14, 21, 17), fill="#f4f4f4")
+    draw.rectangle((18, 18, 23, 19), fill="#f4f4f4")
+    draw.rectangle((4, 22, 27, 23), fill="#5d91f4")
+    draw.rectangle((6, 24, 25, 25), fill="#5d91f4")
+    draw.rectangle((8, 26, 23, 27), fill="#5d91f4")
     return image
 
 
@@ -63,8 +60,43 @@ def main() -> None:
         ("StoreLogo.png", 50),
     ]:
         write_icon(image, filename, size)
-    image.save(ROOT / "icon.ico", format="ICO", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-    image.save(ROOT / "icon.icns", format="ICNS")
+    large = image.resize((1024, 1024), Image.Resampling.NEAREST)
+    large.save(ROOT / "icon.ico", format="ICO", sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
+    large.save(ROOT / "icon.icns", format="ICNS")
+    # Export the same pixel drawing as resolution-independent SVG.
+    pixels = []
+    for y in range(32):
+        for x in range(32):
+            r,g,b,a = image.getpixel((x,y))
+            if a:
+                pixels.append(f'<path fill="#{r:02x}{g:02x}{b:02x}" d="M{x} {y}h1v1h-1z"/>')
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">' + ''.join(pixels) + '</svg>'
+    glyphs = {
+        'C':['11111','11000','11000','11000','11000','11000','11111'],
+        'R':['11110','11011','11011','11110','11100','11010','11011'],
+        'E':['11111','11000','11000','11110','11000','11000','11111'],
+        'W':['11011','11011','11011','11011','11111','11111','01010'],
+        '.':['00','00','00','00','00','11','11'],
+        'S':['11111','11000','11000','11111','00011','00011','11111'],
+        'H':['11011','11011','11011','11111','11011','11011','11011'],
+        'I':['111','010','010','010','010','010','111'],
+        'P':['11110','11011','11011','11110','11000','11000','11000'],
+    }
+    blocks = []; offset = 1
+    for letter in 'CREW.SHIP':
+        for y,row in enumerate(glyphs[letter]):
+            for x,cell in enumerate(row):
+                if cell == '1': blocks.append(f'M{offset+x} {y+1}h1v1h-1z')
+        offset += len(glyphs[letter][0]) + 1
+    path = ''.join(blocks)
+    wordmark = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {offset+2} 12"><path d="{path}" fill="#080b10" stroke="#080b10" stroke-width=".8" transform="translate(1 3)"/><path d="{path}" fill="#6d7e94" transform="translate(.5 1.5)"/><path d="{path}" fill="#f8f5ed"/></svg>'
+    repo = ROOT.parents[2]
+    for folder in [repo / 'public' / 'brand', repo / 'desktop' / 'public' / 'brand']:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'ship.svg').write_text(svg, encoding='utf-8')
+        (folder / 'wordmark.svg').write_text(wordmark, encoding='utf-8')
+        large.save(folder / 'ship.png')
+    (repo / 'public' / 'favicon.ico').write_bytes((ROOT / 'icon.ico').read_bytes())
 
 
 if __name__ == "__main__":

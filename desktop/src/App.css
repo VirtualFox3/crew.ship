@@ -1,4 +1,13 @@
 @font-face{font-family:"Minecraft Ten";src:url('/fonts/MinecraftTen.woff2') format('woff2');font-display:swap;font-weight:400;font-style:normal}
+.public-address-form{display:grid;gap:12px;margin-top:28px;padding-top:20px;border-top:1px solid var(--line);max-width:640px}.public-address-form input{min-width:0;padding:13px;background:var(--paper-2);color:var(--ink);border:1px solid var(--line);font:14px monospace}.public-address-form input:focus-visible{outline:2px solid var(--blue)}.public-address-form button{justify-self:start}
+
+/* Shared, code-drawn voxel ship identity. */
+.app-shell .brand-mark,.login-screen .login-ship,.app-shell .welcome-ship{background:url('/brand/ship.svg') center/contain no-repeat;filter:none;clip-path:none}
+.app-shell .brand-mark{width:48px;height:48px;flex:none}
+.login-screen .login-ship{width:150px;height:150px}
+.app-shell .welcome-ship{width:150px;height:150px}
+.app-shell .brand-mark i,.login-screen .login-ship i,.app-shell .welcome-ship span{display:none}
+.app-shell .brand-mark::before,.app-shell .brand-mark::after,.login-screen .login-ship::before,.login-screen .login-ship::after,.app-shell .welcome-ship::before,.app-shell .welcome-ship::after{display:none}
 
 :root{font-family:"Minecraft Ten",monospace;font-synthesis:none;text-rendering:optimizeLegibility}*{box-sizing:border-box}body{margin:0;min-width:0;min-height:620px}button,input,select{font:inherit}
 .app-shell{--title:"Minecraft Ten",monospace;--canvas:#f6f8fc;--paper:#fff;--paper-2:#eff4fa;--ink:#111827;--muted:#64748b;--line:#d9e2ef;--blue:#2563eb;--blue-dark:#173f9e;--blue-soft:#e9f1ff;--red:#dc334c;--red-dark:#9d1b31;--red-soft:#ffedf0;--green:#0f9b69;--shadow:0 8px 22px rgba(17,24,39,.08);min-height:100vh;display:grid;grid-template-columns:252px 1fr;color:var(--ink);background:var(--canvas)}
