@@ -1,4 +1,4 @@
--- Howl.Host — core schema
+-- Crew.Ship — core schema
 -- Free, unlimited Minecraft server hosting (Java + Bedrock).
 --
 -- Run this first, then 0003_harden_functions.sql, which moves the SECURITY
@@ -112,14 +112,14 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- ---------------------------------------------------------------------------
--- Nodes — machines running the Howl.Host agent
+-- Nodes — machines running the Crew.Ship agent
 -- ---------------------------------------------------------------------------
 
 create table nodes (
   id             uuid primary key default gen_random_uuid(),
   name           text not null,
   region         text not null default 'global',
-  agent_url      text not null,          -- https://node1.howl.host
+  agent_url      text not null,          -- https://node1.crew.ship
   public_host    text not null,          -- hostname players connect to
   status         node_status not null default 'offline',
   max_servers    int not null default 40,
@@ -147,7 +147,7 @@ create table servers (
   node_id         uuid references nodes(id) on delete set null,
 
   name            text not null,
-  subdomain       citext unique not null,      -- <subdomain>.howl.host
+  subdomain       citext unique not null,      -- <subdomain>.crew.ship
   custom_domain   text unique,
 
   edition         server_edition not null default 'java',
@@ -169,7 +169,7 @@ create table servers (
   bedrock_port    int,
 
   -- Gameplay defaults mirrored into server.properties
-  motd            text not null default 'A Howl.Host server',
+  motd            text not null default 'A Crew.Ship server',
   gamemode        text not null default 'survival',
   difficulty      text not null default 'normal',
   seed            text,
