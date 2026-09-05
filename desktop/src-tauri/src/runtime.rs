@@ -1,5 +1,18 @@
 use std::path::PathBuf;
 
+// Java 21 cannot reliably load classes from verbatim Windows JAR paths.
+// Keep canonicalization for validation, but use ordinary paths for processes.
+pub fn process_path(path: &std::path::Path) -> PathBuf {
+    let value = path.to_string_lossy();
+    if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{unc}"))
+    } else if let Some(drive) = value.strip_prefix(r"\\?\") {
+        PathBuf::from(drive)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 pub fn required_java(game: &str) -> Result<u32, String> {
     let parts: Vec<u32> = game.split('.').map(str::parse).collect::<Result<_, _>>()
         .map_err(|_| "Select a stable Minecraft version before starting.".to_owned())?;
@@ -62,6 +75,14 @@ pub fn public_address(value: &str) -> Result<String, String> {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn process_paths_preserve_spaces_and_unc() {
+        for (input, expected) in [
+            (r"\\?\C:\My Servers\server.jar", r"C:\My Servers\server.jar"),
+            (r"\\?\UNC\host\share\server.jar", r"\\host\share\server.jar"),
+            (r"C:\servers\run.bat", r"C:\servers\run.bat"),
+            ("/tmp/server.jar", "/tmp/server.jar"),
+        ] { assert_eq!(process_path(std::path::Path::new(input)), PathBuf::from(expected)); }
+    }
     #[test] fn java_version_boundaries() {
         for (game, major) in [("1.16.5",8),("1.17.1",16),("1.18.2",17),("1.20.4",17),("1.20.5",21),("1.21.4",21),("26.1",25)] { assert_eq!(required_java(game),Ok(major)); }
         assert!(required_java("latest").is_err());

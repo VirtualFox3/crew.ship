@@ -825,6 +825,7 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
     let launch_path = Path::new(&config.jar_path)
         .canonicalize()
         .map_err(|_| "The server file is missing. Reinstall this server.".to_owned())?;
+    let launch_path = runtime::process_path(&launch_path);
     let directory = launch_path
         .parent()
         .ok_or_else(|| "The server folder is invalid.".to_owned())?;
