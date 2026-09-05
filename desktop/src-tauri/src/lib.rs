@@ -769,6 +769,23 @@ fn read_log_stream<R: std::io::Read + Send + 'static>(
     });
 }
 
+/// Forge and NeoForge generate `run.bat` with a final `pause`. That is useful
+/// when somebody double-clicks it, but it leaves a hidden desktop host stuck
+/// after Minecraft stops. Run the loader's own generated argument file instead.
+#[cfg(windows)]
+fn loader_argument_file(directory: &Path, script_name: &str) -> Option<String> {
+    let script = fs::read_to_string(directory.join(script_name)).ok()?;
+    script.split_whitespace().find_map(|token| {
+        let token = token.trim_matches('"');
+        let argument_file = token.strip_prefix('@')?;
+        if !argument_file.ends_with("_args.txt") || !argument_file.contains("libraries/") {
+            return None;
+        }
+        let file = directory.join(argument_file.replace('/', "\\"));
+        file.is_file().then(|| format!("@{argument_file}"))
+    })
+}
+
 #[tauri::command]
 fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<ProcessStatus, String> {
     safe_id(&config.id)?;
@@ -818,6 +835,11 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         .map_err(|error| format!("Could not configure server memory: {error}"))?;
         #[cfg(windows)]
         {
+            if let Some(arguments) = loader_argument_file(directory, "run.bat") {
+                let mut java = Command::new("java");
+                java.args(["@user_jvm_args.txt", &arguments, "nogui"]);
+                java
+            } else {
             // `canonicalize` returns an extended-length `\\?\C:\...` path on
             // Windows. Java accepts that form, but cmd.exe does not treat it as
             // an executable batch-file name. Pass the ordinary path to cmd.
@@ -843,6 +865,7 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
                 .arg(display_path)
                 .arg("nogui");
             script
+            }
         }
         #[cfg(not(windows))]
         {
@@ -1184,11 +1207,11 @@ pub fn run() {
         .manage(HostState::default())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                app.deep_link().register_all()?;
+                _app.deep_link().register_all()?;
             }
             Ok(())
         })
