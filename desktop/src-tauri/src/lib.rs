@@ -165,7 +165,7 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
 
 fn http_get(url: impl AsRef<str>) -> Result<reqwest::blocking::Response, String> {
     reqwest::blocking::Client::builder()
-        .user_agent("Crew.Ship/0.4 (https://github.com/VirtualFox3/Pack.Host)")
+        .user_agent("Crew.Ship/0.5 (https://github.com/VirtualFox3/Crew.Ship)")
         .build()
         .map_err(|error| format!("Could not create the download client: {error}"))?
         .get(url.as_ref())
@@ -970,7 +970,7 @@ fn search_modrinth(query: String, kind: String) -> Result<Vec<AddonResult>, Stri
     let facets = serde_json::to_string(&vec![vec![format!("project_type:{project_type}")]])
         .map_err(|error| error.to_string())?;
     let client = reqwest::blocking::Client::builder()
-        .user_agent("Crew.Ship/0.4 (https://github.com/VirtualFox3/Pack.Host)")
+        .user_agent("Crew.Ship/0.5 (https://github.com/VirtualFox3/Crew.Ship)")
         .build()
         .map_err(|error| format!("Could not create the catalog client: {error}"))?;
     let response: ModrinthSearchResponse = client
@@ -1031,7 +1031,7 @@ fn install_modrinth_addon(
     let game_versions =
         serde_json::to_string(&vec![game_version]).map_err(|error| error.to_string())?;
     let client = reqwest::blocking::Client::builder()
-        .user_agent("Crew.Ship/0.4 (https://github.com/VirtualFox3/Pack.Host)")
+        .user_agent("Crew.Ship/0.5 (https://github.com/VirtualFox3/Crew.Ship)")
         .build()
         .map_err(|error| format!("Could not create the catalog client: {error}"))?;
     let versions: Vec<ModrinthVersion> = client
