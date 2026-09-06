@@ -18,6 +18,8 @@ type SystemStatus = {
   playitInstalled: boolean;
   playitPath?: string;
   playitConfigured?: boolean;
+  playitAccountLinked?: boolean;
+  playitAgentLinked?: boolean;
   dataDirectory: string;
   localAddress?: string;
 };
@@ -130,6 +132,8 @@ function App() {
   const [logs, setLogs] = useState<string[]>([]);
   const [playitRunning, setPlayitRunning] = useState(false);
   const [playitSecret, setPlayitSecret] = useState("");
+  const [playitSetupCode, setPlayitSetupCode] = useState("");
+  const [playitClaim, setPlayitClaim] = useState<{ code: string; url: string }>();
   const [welcomeOpen, setWelcomeOpen] = useState(() => localStorage.getItem(WELCOME_KEY) !== "true");
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem(THEME_KEY);
@@ -459,12 +463,61 @@ function App() {
     }
   }
 
+  async function connectPlayitWithCode() {
+    setBusy("playit");
+    setError(undefined);
+    try {
+      await invoke("configure_playit_setup_code", { code: playitSetupCode });
+      setPlayitSetupCode("");
+      await refreshSystem();
+      setNotice("Playit account linked locally. Now link the Crew.Ship agent below so Crew.Ship can create each server's tunnel automatically.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function beginPlayitAgentLink() {
+    setBusy("playit");
+    setError(undefined);
+    try {
+      const claim = await invoke<{ code: string; url: string }>("begin_playit_agent_claim");
+      setPlayitClaim(claim);
+      await openUrl(claim.url);
+      setNotice("Approve Crew.Ship as the local Playit agent in your browser, then come back and select CHECK APPROVAL.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function finishPlayitAgentLink() {
+    if (!playitClaim) return;
+    setBusy("playit");
+    setError(undefined);
+    try {
+      await invoke<boolean>("finish_playit_agent_claim", { code: playitClaim.code });
+      setPlayitClaim(undefined);
+      setPlayitRunning(true);
+      await refreshSystem();
+      setNotice("Crew.Ship is linked as your local Playit agent. New tunnel addresses are created automatically when you start servers.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
   async function disconnectPlayit() {
     setBusy("playit");
     setError(undefined);
     try {
       await invoke("disconnect_playit");
       setPlayitSecret("");
+      setPlayitSetupCode("");
+      setPlayitClaim(undefined);
       setPlayitRunning(false);
       await refreshSystem();
       setNotice("Playit was disconnected from this computer. You can paste a different agent secret now.");
@@ -871,7 +924,7 @@ function App() {
             <div className="settings-grid">
               <section className="settings-card wide appearance-card"><div className="card-heading"><span>APPEARANCE</span><Pill ok /></div><h3>Choose your ship colors</h3><p>True neutral gray is the default. Pick a completely different mood whenever you want—the whole app updates instantly.</p><div className="theme-picker"><ThemeChoice theme="graphite" current={theme} label="True Gray" colors={["#181818", "#5d91f4", "#df596a"]} onSelect={setTheme} /><ThemeChoice theme="slate" current={theme} label="Cool Slate" colors={["#1b1e23", "#78a7ff", "#ef7180"]} onSelect={setTheme} /><ThemeChoice theme="ocean" current={theme} label="Deep Ocean" colors={["#0e151b", "#35a7ff", "#ff667d"]} onSelect={setTheme} /><ThemeChoice theme="forest" current={theme} label="Forest" colors={["#101a15", "#56c596", "#dc6075"]} onSelect={setTheme} /><ThemeChoice theme="violet" current={theme} label="Ender" colors={["#171221", "#a77bff", "#ff628e"]} onSelect={setTheme} /><ThemeChoice theme="ember" current={theme} label="Nether" colors={["#1e1311", "#ff9d45", "#ef4c57"]} onSelect={setTheme} /><ThemeChoice theme="light" current={theme} label="Snow" colors={["#ffffff", "#245eea", "#d93f53"]} onSelect={setTheme} /><ThemeChoice theme="custom" current={theme} label="Your colors" colors={[customTheme.canvas, customTheme.blue, customTheme.red]} onSelect={setTheme} /></div><div className="custom-theme-controls"><label>BACKGROUND<input type="color" value={customTheme.canvas} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, canvas: event.target.value })); }} /></label><label>PANEL<input type="color" value={customTheme.paper} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, paper: event.target.value })); }} /></label><label>BLUE<input type="color" value={customTheme.blue} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, blue: event.target.value })); }} /></label><label>RED<input type="color" value={customTheme.red} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, red: event.target.value })); }} /></label></div></section>
               <section className="settings-card"><div className="card-heading"><span>JAVA RUNTIME</span><Pill ok={Boolean(system?.javaInstalled)} /></div><h3>{system?.javaInstalled ? "Ready" : "Downloads when needed"}</h3><p>{system?.javaMajors?.length ? `Installed: Java ${system.javaMajors.join(", ")}` : "Crew.Ship downloads the compatible Java runtime when you start a supported server."}</p><p>Forge and Fabric choose the exact compatible runtime automatically.</p></section>
-              <section className="settings-card"><div className="card-heading"><span>PUBLIC TUNNEL</span><Pill ok={playitRunning} /></div><h3>{playitRunning ? "Tunnel running" : system?.playitConfigured ? "Playit agent ready" : "Connect Playit"}</h3><p>{system?.playitConfigured ? "This secret is stored only on this computer. The agent starts automatically with your servers." : "Paste your Playit agent secret here—not your account password."}</p>{!system?.playitConfigured && <><input type="password" value={playitSecret} onChange={(event) => setPlayitSecret(event.target.value)} placeholder="Paste Playit agent secret" autoComplete="off" aria-label="Playit agent secret" /><button className="primary" disabled={busy === "playit" || !playitSecret.trim()} onClick={() => void connectPlayit()}>{busy === "playit" ? "CONNECTING…" : "CONNECT PLAYIT"}</button></>}<div className="button-row">{system?.playitConfigured && <><button className="primary" disabled={busy === "playit"} onClick={() => void togglePlayit()}>{busy === "playit" ? "PREPARING…" : playitRunning ? "STOP TUNNEL" : "START TUNNEL"}</button><button className="ghost danger-text" disabled={busy === "playit"} onClick={() => void disconnectPlayit()}>REPLACE SECRET</button></>}<button className="ghost" onClick={() => void openUrl("https://playit.gg")}>OPEN PLAYIT ↗</button></div></section>
+              <section className="settings-card"><div className="card-heading"><span>PUBLIC TUNNEL</span><Pill ok={Boolean(system?.playitAccountLinked && system?.playitAgentLinked)} /></div><h3>{playitRunning ? "Tunnel ready" : system?.playitAccountLinked ? "Finish local agent link" : "Connect Playit"}</h3><p>Use Playit’s <b>Third Party App</b> option. Crew.Ship saves the one-time account connection only on this computer, then creates Minecraft tunnels for your servers automatically.</p>{!system?.playitAccountLinked && <div className="tunnel-step"><span>1 · ACCOUNT</span><input type="password" value={playitSetupCode} onChange={(event) => setPlayitSetupCode(event.target.value)} placeholder="Paste one-time Playit setup code" autoComplete="off" aria-label="Playit setup code" /><button className="primary" disabled={busy === "playit" || !playitSetupCode.trim()} onClick={() => void connectPlayitWithCode()}>{busy === "playit" ? "LINKING…" : "LINK ACCOUNT"}</button><button className="ghost" onClick={() => void openUrl("https://playit.gg/account/setup/wizard/new-account/third-party/third-party-select?partner=other")}>GET SETUP CODE ↗</button></div>}{system?.playitAccountLinked && !system?.playitAgentLinked && <div className="tunnel-step"><span>2 · THIS COMPUTER</span><p>Approve one local Crew.Ship agent. This is what actually receives the tunnel traffic on your PC.</p>{!playitClaim ? <button className="primary" disabled={busy === "playit"} onClick={() => void beginPlayitAgentLink()}>{busy === "playit" ? "OPENING…" : "LINK THIS COMPUTER"}</button> : <><input readOnly value={playitClaim.url} aria-label="Crew.Ship agent approval link" onFocus={(event) => event.currentTarget.select()} /><button className="primary" disabled={busy === "playit"} onClick={() => void finishPlayitAgentLink()}>{busy === "playit" ? "CHECKING…" : "CHECK APPROVAL"}</button><button className="ghost" onClick={() => void openUrl(playitClaim.url)}>OPEN APPROVAL ↗</button></>}</div>}{!system?.playitAgentLinked && <details className="tunnel-fallback"><summary>Already have an agent secret?</summary><input type="password" value={playitSecret} onChange={(event) => setPlayitSecret(event.target.value)} placeholder="Paste Playit agent secret" autoComplete="off" aria-label="Playit agent secret" /><button className="ghost" disabled={busy === "playit" || !playitSecret.trim()} onClick={() => void connectPlayit()}>{busy === "playit" ? "CONNECTING…" : "USE AGENT SECRET"}</button></details>}<div className="button-row">{system?.playitAgentLinked && <button className="primary" disabled={busy === "playit"} onClick={() => void togglePlayit()}>{busy === "playit" ? "PREPARING…" : playitRunning ? "STOP AGENT" : "START AGENT"}</button>}{system?.playitConfigured && <button className="ghost danger-text" disabled={busy === "playit"} onClick={() => void disconnectPlayit()}>DISCONNECT PLAYIT</button>}<button className="ghost" onClick={() => void openUrl("https://playit.gg")}>OPEN PLAYIT ↗</button></div></section>
               <section className="settings-card"><div className="card-heading"><span>CREW.SHIP ACCOUNT</span><Pill ok /></div><h3>{profile?.display_name || profile?.username || "Signed in"}</h3><p>{user.email} · Change your username or manage server admins.</p><form className="username-form" onSubmit={saveUsername}><input value={usernameDraft} onChange={(event) => setUsernameDraft(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" aria-label="Crew.Ship username" /><button className="ghost" disabled={busy === "username"}>{busy === "username" ? "SAVING…" : "SAVE NAME"}</button></form><div className="button-row"><button className="primary" onClick={() => setView("crew")}>MANAGE ADMINS</button><button className="ghost" onClick={() => void logOut()}>LOG OUT</button></div></section>
               <section className="settings-card wide"><div className="card-heading"><span>SERVER STORAGE & ADD-ONS</span><Pill ok /></div><h3>Owned by your crew</h3><p className="mono">{system?.dataDirectory ?? "Loading…"}</p><p>Use Marketplace for one-click installs. Fabric, Forge, and NeoForge use mods; Paper and Purpur use plugins. Stop the server before changing a large modpack.</p></section>
             </div>

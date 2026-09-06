@@ -1,6 +1,6 @@
 [package]
 name = "crew-ship"
-version = "0.5.17"
+version = "0.5.18"
 description = "Run Crew.Ship Minecraft servers on this computer"
 authors = ["Crew.Ship"]
 edition = "2021"
@@ -24,5 +24,6 @@ tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rand = "0.8"
 tauri-plugin-deep-link = "2.4.9"
 tauri-plugin-single-instance = { version = "2.4.3", features = ["deep-link"] }

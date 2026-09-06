@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 mod runtime;
 use serde_json::Value;
+use rand::RngCore;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs,
@@ -26,6 +27,7 @@ const FORGE_METADATA: &str =
 const NEOFORGE_METADATA: &str =
     "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
 const PLAYIT_WINDOWS: &str = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64-signed.exe";
+const PLAYIT_API: &str = "https://api.playit.gg";
 
 #[derive(Default)]
 struct HostState {
@@ -50,6 +52,8 @@ struct SystemStatus {
     playit_installed: bool,
     playit_path: Option<String>,
     playit_configured: bool,
+    playit_account_linked: bool,
+    playit_agent_linked: bool,
     data_directory: String,
     local_address: Option<String>,
 }
@@ -334,6 +338,46 @@ fn playit_log_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(bundled_playit_path(app)?.with_file_name("playit.log"))
 }
 
+fn playit_session_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(bundled_playit_path(app)?.with_file_name("playit-session.json"))
+}
+
+fn configured_playit_session(app: &AppHandle) -> Result<Option<String>, String> {
+    let path = playit_session_path(app)?;
+    let session = fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
+        .and_then(|value| value.get("session_key").and_then(Value::as_str).map(str::to_owned))
+        .filter(|value| !value.trim().is_empty());
+    Ok(session)
+}
+
+fn playit_api(path: &str, authorization: Option<&str>, body: Value) -> Result<Value, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("Could not prepare the Playit connection: {error}"))?;
+    let mut request = client.post(format!("{PLAYIT_API}{path}")).json(&body);
+    if let Some(token) = authorization.filter(|value| !value.is_empty()) {
+        request = request.header("Authorization", token);
+    }
+    let response = request.send().map_err(|error| format!("Playit is unavailable: {error}"))?;
+    let payload: Value = response.json().map_err(|error| format!("Playit returned an invalid response: {error}"))?;
+    if payload.get("status").and_then(Value::as_str) == Some("success") {
+        return Ok(payload.get("data").cloned().unwrap_or(Value::Null));
+    }
+    let detail = payload.get("data").and_then(Value::as_str)
+        .or_else(|| payload.get("message").and_then(Value::as_str))
+        .unwrap_or("Playit rejected this request.");
+    Err(detail.to_owned())
+}
+
+fn claim_code() -> String {
+    let mut bytes = [0u8; 5];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 fn playit_secret_is_valid(value: &str) -> bool {
     let value = value.trim();
     value.len() >= 16 && value.len() % 2 == 0 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -357,6 +401,69 @@ fn configured_playit_secret(app: &AppHandle) -> Result<Option<PathBuf>, String> 
         })
         .unwrap_or(false);
     Ok(valid.then_some(path))
+}
+
+fn playit_secret_value(app: &AppHandle) -> Result<Option<String>, String> {
+    let Some(path) = configured_playit_secret(app)? else { return Ok(None); };
+    let contents = fs::read_to_string(path).map_err(|error| format!("Could not read the local Playit agent key: {error}"))?;
+    let key = contents.trim().strip_prefix("secret_key = ")
+        .and_then(|value| value.trim().strip_prefix('"'))
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(contents.trim())
+        .to_owned();
+    Ok(playit_secret_is_valid(&key).then_some(key))
+}
+
+fn playit_endpoint(tunnel: &Value) -> Option<String> {
+    for key in ["display_address", "assigned_domain", "custom_domain", "public_address"] {
+        if let Some(value) = tunnel.get(key).and_then(Value::as_str).filter(|value| !value.is_empty()) {
+            return Some(value.to_owned());
+        }
+    }
+    let allocation = tunnel.get("alloc")?.get("data")?;
+    let domain = allocation.get("assigned_domain")
+        .or_else(|| allocation.get("assigned_srv"))
+        .or_else(|| allocation.get("ip_hostname"))
+        .and_then(Value::as_str)?;
+    let port = allocation.get("port_start").and_then(Value::as_u64);
+    Some(port.map(|port| format!("{domain}:{port}")).unwrap_or_else(|| domain.to_owned()))
+}
+
+/// Best-effort account-side provisioning. Failure must never stop local play.
+fn provision_playit_tunnel(app: &AppHandle, server_id: &str, software: &str, port: u16) -> Result<Option<String>, String> {
+    let Some(session_key) = configured_playit_session(app)? else { return Ok(None); };
+    let Some(agent_secret) = playit_secret_value(app)? else { return Ok(None); };
+    let agent = playit_api("/agents/rundata", Some(&format!("Agent-Secret {agent_secret}")), serde_json::json!({}))?;
+    let agent_id = agent.get("agent_id").or_else(|| agent.get("id"))
+        .or_else(|| agent.get("agent").and_then(|agent| agent.get("id")))
+        .and_then(Value::as_str)
+        .ok_or("Playit did not return this computer's agent id.")?;
+    let list = playit_api("/tunnels/list", Some(&session_key), serde_json::json!({ "tunnel_id": null, "agent_id": agent_id }))?;
+    let tunnels = list.get("tunnels").and_then(Value::as_array).cloned().unwrap_or_default();
+    let name = format!("Crew.Ship {server_id}");
+    let existing = tunnels.iter().find(|tunnel| tunnel.get("name").and_then(Value::as_str) == Some(name.as_str()));
+    if let Some(tunnel) = existing {
+        let id = tunnel.get("id").and_then(Value::as_str).ok_or("Playit returned a tunnel without an id.")?;
+        playit_api("/tunnels/update", Some(&session_key), serde_json::json!({
+            "tunnel_id": id, "local_ip": "127.0.0.1", "local_port": port,
+            "agent_id": agent_id, "enabled": true
+        }))?;
+        return Ok(playit_endpoint(tunnel));
+    }
+    let tunnel_type = "minecraft-java";
+    let created = playit_api("/tunnels/create", Some(&session_key), serde_json::json!({
+        "name": name,
+        "tunnel_type": tunnel_type,
+        "tunnel_description": format!("Crew.Ship local server ({software})"),
+        "port_type": "tcp", "port_count": 1,
+        "origin": { "type": "agent", "data": { "agent_id": agent_id, "local_ip": "127.0.0.1", "local_port": port } },
+        "enabled": true,
+        "alloc": { "type": "region", "details": { "region": "global" } },
+        "firewall_id": null, "proxy_protocol": null
+    }))?;
+    let id = created.get("id").and_then(Value::as_str).ok_or("Playit did not return a new tunnel id.")?;
+    let refreshed = playit_api("/tunnels/list", Some(&session_key), serde_json::json!({ "tunnel_id": null, "agent_id": agent_id }))?;
+    Ok(refreshed.get("tunnels").and_then(Value::as_array).and_then(|items| items.iter().find(|item| item.get("id").and_then(Value::as_str) == Some(id))).and_then(playit_endpoint))
 }
 
 fn ensure_playit(app: &AppHandle) -> Result<PathBuf, String> {
@@ -478,7 +585,9 @@ fn system_status(app: AppHandle) -> Result<SystemStatus, String> {
         java_majors,
         playit_installed: playit.is_some(),
         playit_path: playit.map(|path| path.to_string_lossy().into_owned()),
-        playit_configured: configured_playit_secret(&app)?.is_some(),
+        playit_configured: configured_playit_secret(&app)?.is_some() || configured_playit_session(&app)?.is_some(),
+        playit_account_linked: configured_playit_session(&app)?.is_some(),
+        playit_agent_linked: configured_playit_secret(&app)?.is_some(),
         data_directory,
         local_address: local_address(),
     })
@@ -1048,6 +1157,17 @@ fn start_server(
     // running automatically whenever one of this computer's servers starts.
     if configured_playit_secret(&app)?.is_some() {
         let _ = start_playit_process(&app, None, &state);
+    }
+    // A Third Party App connection lets Crew.Ship create the matching
+    // Minecraft Java tunnel itself. Keep this best-effort so a temporary
+    // Playit outage never prevents the local server from starting.
+    if let Ok(Some(address)) = provision_playit_tunnel(
+        &app,
+        &config.id,
+        &config.software,
+        server_port(&directory.join("server.properties")),
+    ) {
+        let _ = fs::write(directory.join(".crewship-public-address"), address);
     }
     let java_path = install_java_for_game(&config.game_version)?;
     let installer_platform = matches!(config.software.as_str(), "forge" | "neoforge");
@@ -1622,6 +1742,76 @@ fn configure_playit(
         .map_err(|error| format!("Could not save the local Playit agent secret: {error}"))
 }
 
+/// Accept the short-lived code from Playit's “Third Party App” browser flow.
+/// The returned session is saved only in Crew.Ship's local app-data folder.
+#[tauri::command]
+fn configure_playit_setup_code(app: AppHandle, code: String) -> Result<(), String> {
+    let code = code.trim();
+    if code.len() < 8 || code.len() > 512 {
+        return Err("Paste the one-time setup code shown by Playit, not your password or public address.".into());
+    }
+    let response = playit_api("/login/apply", None, serde_json::json!({ "token": code }))?;
+    let session_key = response
+        .get("session_key")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or("Playit did not return an account session. Generate a fresh setup code and try again.")?;
+    let path = playit_session_path(&app)?;
+    fs::write(&path, serde_json::json!({ "session_key": session_key }).to_string())
+        .map_err(|error| format!("Could not save the local Playit connection: {error}"))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayitClaim {
+    code: String,
+    url: String,
+}
+
+/// Start the local-agent approval flow. This is intentionally separate from
+/// account authorization: the first gives Crew.Ship permission to manage
+/// tunnels, while this gives the official agent permission to run here.
+#[tauri::command]
+fn begin_playit_agent_claim() -> PlayitClaim {
+    let code = claim_code();
+    PlayitClaim {
+        url: format!("https://playit.gg/claim/{code}"),
+        code,
+    }
+}
+
+#[tauri::command]
+fn finish_playit_agent_claim(
+    app: AppHandle,
+    code: String,
+    state: State<'_, HostState>,
+) -> Result<bool, String> {
+    let code = code.trim();
+    if code.len() != 10 || !code.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("That Crew.Ship agent link has expired. Start a new link and approve it in Playit.".into());
+    }
+    let setup = playit_api(
+        "/claim/setup",
+        None,
+        serde_json::json!({ "code": code, "agent_type": "self-managed", "version": "Crew.Ship" }),
+    )?;
+    let status = setup.as_str().unwrap_or_default();
+    if status != "UserAccepted" {
+        return Err(match status {
+            "UserRejected" => "Playit rejected this local agent link. Start a new link if that was a mistake.".into(),
+            _ => "Approve the Crew.Ship agent in the Playit browser tab, then select CHECK APPROVAL again.".into(),
+        });
+    }
+    let exchange = playit_api("/claim/exchange", None, serde_json::json!({ "code": code }))?;
+    let secret = exchange
+        .get("secret_key")
+        .and_then(Value::as_str)
+        .filter(|value| playit_secret_is_valid(value))
+        .ok_or("Playit did not return a valid local-agent key. Start a new link and try again.")?;
+    configure_playit(app.clone(), secret.to_owned(), state)?;
+    start_playit_process(&app, None, &app.state::<HostState>())
+}
+
 #[tauri::command]
 fn disconnect_playit(app: AppHandle, state: State<'_, HostState>) -> Result<(), String> {
     if let Some(mut process) = state
@@ -1637,6 +1827,11 @@ fn disconnect_playit(app: AppHandle, state: State<'_, HostState>) -> Result<(), 
     if secret_path.exists() {
         fs::remove_file(secret_path)
             .map_err(|error| format!("Could not remove the local Playit secret: {error}"))?;
+    }
+    let session_path = playit_session_path(&app)?;
+    if session_path.exists() {
+        fs::remove_file(session_path)
+            .map_err(|error| format!("Could not remove the local Playit connection: {error}"))?;
     }
     Ok(())
 }
@@ -1705,6 +1900,9 @@ pub fn run() {
             install_modrinth_addon,
             start_playit,
             configure_playit,
+            configure_playit_setup_code,
+            begin_playit_agent_claim,
+            finish_playit_agent_claim,
             disconnect_playit,
             stop_playit
         ])
