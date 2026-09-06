@@ -46,8 +46,10 @@ struct ManagedServer {
 struct SystemStatus {
     java_installed: bool,
     java_version: Option<String>,
+    java_majors: Vec<u32>,
     playit_installed: bool,
     playit_path: Option<String>,
+    playit_configured: bool,
     data_directory: String,
     local_address: Option<String>,
 }
@@ -250,6 +252,32 @@ fn bundled_playit_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(tools.join("playit.exe"))
 }
 
+fn playit_secret_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(bundled_playit_path(app)?.with_file_name("playit.toml"))
+}
+
+fn playit_log_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(bundled_playit_path(app)?.with_file_name("playit.log"))
+}
+
+fn playit_secret_is_valid(value: &str) -> bool {
+    let value = value.trim();
+    value.len() >= 16 && value.len() % 2 == 0 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn configured_playit_secret(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let path = playit_secret_path(app)?;
+    let valid = fs::read_to_string(&path).ok().map(|contents| {
+        let trimmed = contents.trim();
+        if playit_secret_is_valid(trimmed) { true } else {
+            trimmed.strip_prefix("secret_key = ").and_then(|value| value.trim().strip_prefix('"'))
+                .and_then(|value| value.strip_suffix('"'))
+                .is_some_and(playit_secret_is_valid)
+        }
+    }).unwrap_or(false);
+    Ok(valid.then_some(path))
+}
+
 fn ensure_playit(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(path) = find_playit() {
         return Ok(path);
@@ -339,15 +367,21 @@ fn first_available_port(servers_dir: &Path) -> u16 {
 #[tauri::command]
 fn system_status(app: AppHandle) -> Result<SystemStatus, String> {
     let java_version = command_output("java", &["-version"]);
+    let java_majors = [8, 16, 17, 21, 25].into_iter().filter(|major| {
+        runtime::java_candidates(*major).into_iter().any(|path| command_output(&path.to_string_lossy(), &["-version"])
+            .and_then(|output| runtime::java_major(&output)) == Some(*major))
+    }).collect::<Vec<_>>();
     let playit =
         find_playit().or_else(|| bundled_playit_path(&app).ok().filter(|path| path.is_file()));
     let data_directory = app_servers_dir(&app)?.to_string_lossy().into_owned();
 
     Ok(SystemStatus {
-        java_installed: java_version.is_some(),
+        java_installed: !java_majors.is_empty(),
         java_version,
+        java_majors,
         playit_installed: playit.is_some(),
         playit_path: playit.map(|path| path.to_string_lossy().into_owned()),
+        playit_configured: configured_playit_secret(&app)?.is_some(),
         data_directory,
         local_address: local_address(),
     })
@@ -1187,6 +1221,7 @@ fn start_playit(
     if !executable.is_file() {
         return Err("The selected playit.gg executable does not exist.".into());
     }
+    let secret_path = configured_playit_secret(&app)?.ok_or("Playit needs an agent secret before it can connect. In Playit, create or select an agent on this computer, copy its agent secret, then paste it in Crew.Ship Host settings. Your Playit password is never needed here.")?;
 
     let mut playit = state.playit.lock().map_err(|_| "State lock failed.")?;
     if let Some(process) = playit.as_mut() {
@@ -1200,6 +1235,7 @@ fn start_playit(
     }
     let mut command = Command::new(executable);
     hidden(&mut command);
+    command.args(["--secret-path", secret_path.to_string_lossy().as_ref(), "--log-path", playit_log_path(&app)?.to_string_lossy().as_ref()]);
     *playit = Some(
         command
             .stdin(Stdio::null())
@@ -1209,6 +1245,21 @@ fn start_playit(
             .map_err(|error| format!("playit.gg could not start: {error}"))?,
     );
     Ok(true)
+}
+
+#[tauri::command]
+fn configure_playit(app: AppHandle, secret: String, state: State<'_, HostState>) -> Result<(), String> {
+    let secret = secret.trim();
+    if !playit_secret_is_valid(secret) {
+        return Err("That does not look like a Playit agent secret. Paste the hexadecimal agent secret from Playit, not your Playit password or public server address.".into());
+    }
+    if let Some(mut process) = state.playit.lock().map_err(|_| "State lock failed.")?.take() {
+        let _ = process.kill();
+        let _ = process.wait();
+    }
+    let path = playit_secret_path(&app)?;
+    fs::write(&path, format!("secret_key = \"{secret}\"\n"))
+        .map_err(|error| format!("Could not save the local Playit agent secret: {error}"))
 }
 
 #[tauri::command]
@@ -1270,6 +1321,7 @@ pub fn run() {
             search_modrinth,
             install_modrinth_addon,
             start_playit,
+            configure_playit,
             stop_playit
         ])
         .run(tauri::generate_context!())

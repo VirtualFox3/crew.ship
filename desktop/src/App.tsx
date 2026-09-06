@@ -14,8 +14,10 @@ type Software = "vanilla" | "paper" | "purpur" | "fabric" | "forge" | "neoforge"
 type SystemStatus = {
   javaInstalled: boolean;
   javaVersion?: string;
+  javaMajors?: number[];
   playitInstalled: boolean;
   playitPath?: string;
+  playitConfigured?: boolean;
   dataDirectory: string;
   localAddress?: string;
 };
@@ -125,6 +127,7 @@ function App() {
   const [logsFor, setLogsFor] = useState<string>();
   const [logs, setLogs] = useState<string[]>([]);
   const [playitRunning, setPlayitRunning] = useState(false);
+  const [playitSecret, setPlayitSecret] = useState("");
   const [welcomeOpen, setWelcomeOpen] = useState(() => localStorage.getItem(WELCOME_KEY) !== "true");
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem(THEME_KEY);
@@ -418,6 +421,23 @@ function App() {
         ? await invoke<boolean>("stop_playit")
         : await invoke<boolean>("start_playit", { path: system?.playitPath ?? null });
       setPlayitRunning(next);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function connectPlayit() {
+    setBusy("playit");
+    setError(undefined);
+    try {
+      await invoke("configure_playit", { secret: playitSecret });
+      setPlayitSecret("");
+      await invoke<boolean>("start_playit", { path: system?.playitPath ?? null });
+      setPlayitRunning(true);
+      await refreshSystem();
+      setNotice("Playit agent saved locally and started. Create a Minecraft Java tunnel in Playit that forwards to this server's local port, then paste its public address in the server overview.");
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -806,8 +826,8 @@ function App() {
             <PageTitle title="Host settings" subtitle="System checks and tunnel controls for this computer." />
             <div className="settings-grid">
               <section className="settings-card wide appearance-card"><div className="card-heading"><span>APPEARANCE</span><Pill ok /></div><h3>Choose your ship colors</h3><p>True neutral gray is the default. Pick a completely different mood whenever you want—the whole app updates instantly.</p><div className="theme-picker"><ThemeChoice theme="graphite" current={theme} label="True Gray" colors={["#181818", "#5d91f4", "#df596a"]} onSelect={setTheme} /><ThemeChoice theme="slate" current={theme} label="Cool Slate" colors={["#1b1e23", "#78a7ff", "#ef7180"]} onSelect={setTheme} /><ThemeChoice theme="ocean" current={theme} label="Deep Ocean" colors={["#0e151b", "#35a7ff", "#ff667d"]} onSelect={setTheme} /><ThemeChoice theme="forest" current={theme} label="Forest" colors={["#101a15", "#56c596", "#dc6075"]} onSelect={setTheme} /><ThemeChoice theme="violet" current={theme} label="Ender" colors={["#171221", "#a77bff", "#ff628e"]} onSelect={setTheme} /><ThemeChoice theme="ember" current={theme} label="Nether" colors={["#1e1311", "#ff9d45", "#ef4c57"]} onSelect={setTheme} /><ThemeChoice theme="light" current={theme} label="Snow" colors={["#ffffff", "#245eea", "#d93f53"]} onSelect={setTheme} /><ThemeChoice theme="custom" current={theme} label="Your colors" colors={[customTheme.canvas, customTheme.blue, customTheme.red]} onSelect={setTheme} /></div><div className="custom-theme-controls"><label>BACKGROUND<input type="color" value={customTheme.canvas} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, canvas: event.target.value })); }} /></label><label>PANEL<input type="color" value={customTheme.paper} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, paper: event.target.value })); }} /></label><label>BLUE<input type="color" value={customTheme.blue} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, blue: event.target.value })); }} /></label><label>RED<input type="color" value={customTheme.red} onChange={(event) => { setTheme("custom"); setCustomTheme((current) => ({ ...current, red: event.target.value })); }} /></label></div></section>
-              <section className="settings-card"><div className="card-heading"><span>JAVA RUNTIME</span><Pill ok={Boolean(system?.javaInstalled)} /></div><h3>{system?.javaInstalled ? "Ready" : "Java not found"}</h3><p>{system?.javaVersion ?? "Install Java 21 or newer to run recent Minecraft versions."}</p><button className="ghost" onClick={() => void openUrl("https://adoptium.net/temurin/releases/")}>GET JAVA ↗</button></section>
-              <section className="settings-card"><div className="card-heading"><span>PUBLIC TUNNEL</span><Pill ok={playitRunning} /></div><h3>{playitRunning ? "Tunnel running" : "Playit.gg ready"}</h3><p>{system?.playitPath ?? "The official playit.gg agent downloads automatically the first time you start the tunnel."}</p><div className="button-row"><button className="primary" disabled={busy === "playit"} onClick={() => void togglePlayit()}>{busy === "playit" ? "PREPARING…" : playitRunning ? "STOP TUNNEL" : system?.playitInstalled ? "START TUNNEL" : "DOWNLOAD & START"}</button><button className="ghost" onClick={() => void openUrl("https://playit.gg")}>PLAYIT ACCOUNT ↗</button></div></section>
+              <section className="settings-card"><div className="card-heading"><span>JAVA RUNTIME</span><Pill ok={Boolean(system?.javaInstalled)} /></div><h3>{system?.javaInstalled ? "Ready" : "Java not found"}</h3><p>{system?.javaMajors?.length ? `Installed: Java ${system.javaMajors.join(", ")}` : system?.javaVersion ?? "Install Java for the Minecraft version you choose."}</p><p>Forge and Fabric choose the exact compatible runtime automatically.</p><button className="ghost" onClick={() => void openUrl("https://adoptium.net/temurin/releases/")}>GET JAVA ↗</button></section>
+              <section className="settings-card"><div className="card-heading"><span>PUBLIC TUNNEL</span><Pill ok={playitRunning} /></div><h3>{playitRunning ? "Tunnel running" : system?.playitConfigured ? "Playit agent ready" : "Connect Playit"}</h3><p>{system?.playitConfigured ? "Your agent secret is stored only on this computer. Make a Minecraft Java tunnel in Playit, then save its address in the server overview." : "Open Playit, create an agent for this computer, then paste that agent’s secret here. Do not paste your password."}</p>{!system?.playitConfigured && <><input type="password" value={playitSecret} onChange={(event) => setPlayitSecret(event.target.value)} placeholder="Paste Playit agent secret" autoComplete="off" aria-label="Playit agent secret" /><button className="primary" disabled={busy === "playit" || !playitSecret.trim()} onClick={() => void connectPlayit()}>{busy === "playit" ? "CONNECTING…" : "CONNECT PLAYIT"}</button></>}<div className="button-row">{system?.playitConfigured && <button className="primary" disabled={busy === "playit"} onClick={() => void togglePlayit()}>{busy === "playit" ? "PREPARING…" : playitRunning ? "STOP TUNNEL" : "START TUNNEL"}</button>}<button className="ghost" onClick={() => void openUrl("https://playit.gg")}>OPEN PLAYIT ↗</button></div></section>
               <section className="settings-card"><div className="card-heading"><span>CREW.SHIP ACCOUNT</span><Pill ok /></div><h3>{profile?.display_name || profile?.username || "Signed in"}</h3><p>{user.email} · Change your username or manage server admins.</p><form className="username-form" onSubmit={saveUsername}><input value={usernameDraft} onChange={(event) => setUsernameDraft(event.target.value)} minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" aria-label="Crew.Ship username" /><button className="ghost" disabled={busy === "username"}>{busy === "username" ? "SAVING…" : "SAVE NAME"}</button></form><div className="button-row"><button className="primary" onClick={() => setView("crew")}>MANAGE ADMINS</button><button className="ghost" onClick={() => void logOut()}>LOG OUT</button></div></section>
               <section className="settings-card wide"><div className="card-heading"><span>SERVER STORAGE & ADD-ONS</span><Pill ok /></div><h3>Owned by your crew</h3><p className="mono">{system?.dataDirectory ?? "Loading…"}</p><p>Use Marketplace for one-click installs. Fabric, Forge, and NeoForge use mods; Paper and Purpur use plugins. Stop the server before changing a large modpack.</p></section>
             </div>
