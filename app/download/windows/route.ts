@@ -4,7 +4,7 @@ const repository = "https://github.com/VirtualFox3/crew.ship";
 export async function GET(request: Request) {
   const msi = new URL(request.url).searchParams.get("format") === "msi";
   try {
-    const response = await fetch("https://api.github.com/repos/VirtualFox3/crew.ship/releases?per_page=20", { next: { revalidate: 60 }, headers: { Accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(8000) });
+    const response = await fetch("https://api.github.com/repos/VirtualFox3/crew.ship/releases?per_page=20", { cache: "no-store", headers: { Accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(8000) });
     if (!response.ok) throw new Error("Releases unavailable");
     const releases = await response.json() as Array<{ draft: boolean; prerelease: boolean; tag_name: string; assets: Array<{name: string; browser_download_url: string}> }>;
     const pattern = msi ? /^Crew\.Ship_[0-9.]+_x64_en-US\.msi$/ : /^Crew\.Ship_[0-9.]+_x64-setup\.exe$/;
