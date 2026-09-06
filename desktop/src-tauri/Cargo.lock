@@ -619,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "crew-ship"
-version = "0.5.18"
+version = "0.5.19"
 dependencies = [
  "rand 0.8.8",
  "reqwest 0.12.28",
