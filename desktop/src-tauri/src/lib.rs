@@ -347,7 +347,7 @@ fn configured_playit_session(app: &AppHandle) -> Result<Option<String>, String> 
     let session = fs::read_to_string(path)
         .ok()
         .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
-        .and_then(|value| value.get("session_key").and_then(Value::as_str).map(str::to_owned))
+        .and_then(|value| value.get("session_cookie").or_else(|| value.get("session_key")).and_then(Value::as_str).map(str::to_owned))
         .filter(|value| !value.trim().is_empty());
     Ok(session)
 }
@@ -363,10 +363,14 @@ fn playit_api(path: &str, authorization: Option<&str>, body: Value) -> Result<Va
     let mut request = client
         .post(format!("{PLAYIT_API}{path}"))
         .header("x-ref-track", "crew.ship")
-        .header("x-web-version", "crew.ship")
+        .header("x-web-version", "main-14978a0")
         .json(&body);
     if let Some(token) = authorization.filter(|value| !value.is_empty()) {
-        request = request.header("Authorization", token);
+        request = if let Some(cookie) = token.strip_prefix("Cookie ") {
+            request.header("Cookie", cookie)
+        } else {
+            request.header("Authorization", token)
+        };
     }
     let response = request.send().map_err(|error| format!("Playit is unavailable: {error}"))?;
     if !response.status().is_success() {
@@ -384,6 +388,39 @@ fn playit_api(path: &str, authorization: Option<&str>, body: Value) -> Result<Va
         .or_else(|| payload.get("message").and_then(Value::as_str))
         .unwrap_or("Playit rejected this request.");
     Err(detail.to_owned())
+}
+
+/// Playit's third-party setup code signs a client in with a Set-Cookie header.
+/// Their browser client relies on that cookie rather than a JSON session key.
+fn apply_playit_setup_code(code: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("Could not prepare the Playit connection: {error}"))?;
+    let response = client
+        .post(format!("{PLAYIT_API}/login/apply"))
+        .header("x-ref-track", "crew.ship")
+        .header("x-web-version", "main-14978a0")
+        .json(&serde_json::json!({ "token": code }))
+        .send()
+        .map_err(|error| format!("Playit is unavailable: {error}"))?;
+    if !response.status().is_success() {
+        return Err(match response.status().as_u16() {
+            401 => "That Playit setup code is invalid or expired. Generate a new Third Party App code in Playit, then paste it into Crew.Ship immediately.".into(),
+            429 => "Playit is temporarily rate-limiting requests. Wait a minute, generate a fresh setup code, then try again.".into(),
+            status => format!("Playit could not complete this request (HTTP {status}). Try again shortly."),
+        });
+    }
+    let cookie = response
+        .headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .filter_map(|header| header.to_str().ok())
+        .find_map(|header| header.split(';').next())
+        .filter(|value| value.contains('='))
+        .map(str::to_owned)
+        .ok_or("Playit accepted the setup code but did not return an account session. Generate a fresh code and try again.")?;
+    Ok(cookie)
 }
 
 fn claim_code() -> String {
@@ -452,20 +489,21 @@ fn provision_playit_tunnel(app: &AppHandle, server_id: &str, software: &str, por
         .or_else(|| agent.get("agent").and_then(|agent| agent.get("id")))
         .and_then(Value::as_str)
         .ok_or("Playit did not return this computer's agent id.")?;
-    let list = playit_api("/tunnels/list", Some(&session_key), serde_json::json!({ "tunnel_id": null, "agent_id": agent_id }))?;
+    let account_auth = format!("Cookie {session_key}");
+    let list = playit_api("/tunnels/list", Some(&account_auth), serde_json::json!({ "tunnel_id": null, "agent_id": agent_id }))?;
     let tunnels = list.get("tunnels").and_then(Value::as_array).cloned().unwrap_or_default();
     let name = format!("Crew.Ship {server_id}");
     let existing = tunnels.iter().find(|tunnel| tunnel.get("name").and_then(Value::as_str) == Some(name.as_str()));
     if let Some(tunnel) = existing {
         let id = tunnel.get("id").and_then(Value::as_str).ok_or("Playit returned a tunnel without an id.")?;
-        playit_api("/tunnels/update", Some(&session_key), serde_json::json!({
+        playit_api("/tunnels/update", Some(&account_auth), serde_json::json!({
             "tunnel_id": id, "local_ip": "127.0.0.1", "local_port": port,
             "agent_id": agent_id, "enabled": true
         }))?;
         return Ok(playit_endpoint(tunnel));
     }
     let tunnel_type = "minecraft-java";
-    let created = playit_api("/tunnels/create", Some(&session_key), serde_json::json!({
+    let created = playit_api("/tunnels/create", Some(&account_auth), serde_json::json!({
         "name": name,
         "tunnel_type": tunnel_type,
         "tunnel_description": format!("Crew.Ship local server ({software})"),
@@ -476,7 +514,7 @@ fn provision_playit_tunnel(app: &AppHandle, server_id: &str, software: &str, por
         "firewall_id": null, "proxy_protocol": null
     }))?;
     let id = created.get("id").and_then(Value::as_str).ok_or("Playit did not return a new tunnel id.")?;
-    let refreshed = playit_api("/tunnels/list", Some(&session_key), serde_json::json!({ "tunnel_id": null, "agent_id": agent_id }))?;
+    let refreshed = playit_api("/tunnels/list", Some(&account_auth), serde_json::json!({ "tunnel_id": null, "agent_id": agent_id }))?;
     Ok(refreshed.get("tunnels").and_then(Value::as_array).and_then(|items| items.iter().find(|item| item.get("id").and_then(Value::as_str) == Some(id))).and_then(playit_endpoint))
 }
 
@@ -1764,14 +1802,9 @@ fn configure_playit_setup_code(app: AppHandle, code: String) -> Result<(), Strin
     if code.len() < 8 || code.len() > 512 {
         return Err("Paste the one-time setup code shown by Playit, not your password or public address.".into());
     }
-    let response = playit_api("/login/apply", None, serde_json::json!({ "token": code }))?;
-    let session_key = response
-        .get("session_key")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or("Playit did not return an account session. Generate a fresh setup code and try again.")?;
+    let session_cookie = apply_playit_setup_code(code)?;
     let path = playit_session_path(&app)?;
-    fs::write(&path, serde_json::json!({ "session_key": session_key }).to_string())
+    fs::write(&path, serde_json::json!({ "session_cookie": session_cookie }).to_string())
         .map_err(|error| format!("Could not save the local Playit connection: {error}"))
 }
 
