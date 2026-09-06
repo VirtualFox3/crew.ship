@@ -362,7 +362,7 @@ fn playit_api(path: &str, authorization: Option<&str>, body: Value) -> Result<Va
     // consistent without sending any account data beyond the requested body.
     let mut request = client
         .post(format!("{PLAYIT_API}{path}"))
-        .header("x-ref-track", "crew.ship")
+        .header("x-ref-track", "||")
         .header("x-web-version", "main-14978a0")
         .json(&body);
     if let Some(token) = authorization.filter(|value| !value.is_empty()) {
@@ -399,7 +399,7 @@ fn apply_playit_setup_code(code: &str) -> Result<String, String> {
         .map_err(|error| format!("Could not prepare the Playit connection: {error}"))?;
     let response = client
         .post(format!("{PLAYIT_API}/login/apply"))
-        .header("x-ref-track", "crew.ship")
+        .header("x-ref-track", "||")
         .header("x-web-version", "main-14978a0")
         .json(&serde_json::json!({ "token": code }))
         .send()
