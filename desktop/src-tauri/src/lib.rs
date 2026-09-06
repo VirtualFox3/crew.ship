@@ -2,14 +2,14 @@ use serde::{Deserialize, Serialize};
 mod runtime;
 use serde_json::Value;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, State};
 
@@ -89,6 +89,17 @@ struct ServerAddress {
     lan_address: Option<String>,
     public_address: Option<String>,
     port: u16,
+    playit_configured: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupItem {
+    id: String,
+    name: String,
+    path: String,
+    size_bytes: u64,
+    created_at: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -135,6 +146,14 @@ struct AddonResult {
 struct ModrinthVersion {
     name: String,
     files: Vec<ModrinthFile>,
+    #[serde(default)]
+    dependencies: Vec<ModrinthDependency>,
+}
+
+#[derive(Deserialize)]
+struct ModrinthDependency {
+    project_id: Option<String>,
+    dependency_type: String,
 }
 
 #[derive(Deserialize)]
@@ -150,6 +169,7 @@ struct InstalledAddon {
     name: String,
     filename: String,
     directory: String,
+    installed_files: u32,
 }
 
 fn hidden(command: &mut Command) -> &mut Command {
@@ -162,7 +182,9 @@ fn java_for_game(game: &str) -> Result<PathBuf, String> {
     let major = runtime::required_java(game)?;
     for path in runtime::java_candidates(major) {
         if let Some(output) = command_output(&path.to_string_lossy(), &["-version"]) {
-            if runtime::java_major(&output) == Some(major) { return Ok(path); }
+            if runtime::java_major(&output) == Some(major) {
+                return Ok(path);
+            }
         }
     }
     Err(format!("Minecraft {game} needs Java {major}. Install the 64-bit Java {major} runtime, then retry. Crew.Ship will find it automatically; it will not use an incompatible Java version."))
@@ -226,6 +248,14 @@ fn app_servers_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(servers)
 }
 
+fn app_backups_dir(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    Ok(data.join("backups").join(id))
+}
+
 fn local_ip() -> Option<std::net::IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
@@ -267,14 +297,21 @@ fn playit_secret_is_valid(value: &str) -> bool {
 
 fn configured_playit_secret(app: &AppHandle) -> Result<Option<PathBuf>, String> {
     let path = playit_secret_path(app)?;
-    let valid = fs::read_to_string(&path).ok().map(|contents| {
-        let trimmed = contents.trim();
-        if playit_secret_is_valid(trimmed) { true } else {
-            trimmed.strip_prefix("secret_key = ").and_then(|value| value.trim().strip_prefix('"'))
-                .and_then(|value| value.strip_suffix('"'))
-                .is_some_and(playit_secret_is_valid)
-        }
-    }).unwrap_or(false);
+    let valid = fs::read_to_string(&path)
+        .ok()
+        .map(|contents| {
+            let trimmed = contents.trim();
+            if playit_secret_is_valid(trimmed) {
+                true
+            } else {
+                trimmed
+                    .strip_prefix("secret_key = ")
+                    .and_then(|value| value.trim().strip_prefix('"'))
+                    .and_then(|value| value.strip_suffix('"'))
+                    .is_some_and(playit_secret_is_valid)
+            }
+        })
+        .unwrap_or(false);
     Ok(valid.then_some(path))
 }
 
@@ -349,7 +386,11 @@ fn property_value(contents: &str, key: &str, fallback: &str) -> String {
 fn server_port(path: &Path) -> u16 {
     fs::read_to_string(path)
         .ok()
-        .and_then(|contents| contents.lines().find_map(|line| line.strip_prefix("server-port=")?.trim().parse().ok()))
+        .and_then(|contents| {
+            contents
+                .lines()
+                .find_map(|line| line.strip_prefix("server-port=")?.trim().parse().ok())
+        })
         .unwrap_or(25565)
 }
 
@@ -359,18 +400,30 @@ fn first_available_port(servers_dir: &Path) -> u16 {
         .into_iter()
         .flat_map(|entries| entries.flatten())
         .filter_map(|entry| fs::read_to_string(entry.path().join("server.properties")).ok())
-        .filter_map(|contents| contents.lines().find_map(|line| line.strip_prefix("server-port=")?.trim().parse().ok()))
+        .filter_map(|contents| {
+            contents
+                .lines()
+                .find_map(|line| line.strip_prefix("server-port=")?.trim().parse().ok())
+        })
         .collect();
-    (25565..=25665).find(|port| !used.contains(port)).unwrap_or(25565)
+    (25565..=25665)
+        .find(|port| !used.contains(port))
+        .unwrap_or(25565)
 }
 
 #[tauri::command]
 fn system_status(app: AppHandle) -> Result<SystemStatus, String> {
     let java_version = command_output("java", &["-version"]);
-    let java_majors = [8, 16, 17, 21, 25].into_iter().filter(|major| {
-        runtime::java_candidates(*major).into_iter().any(|path| command_output(&path.to_string_lossy(), &["-version"])
-            .and_then(|output| runtime::java_major(&output)) == Some(*major))
-    }).collect::<Vec<_>>();
+    let java_majors = [8, 16, 17, 21, 25]
+        .into_iter()
+        .filter(|major| {
+            runtime::java_candidates(*major).into_iter().any(|path| {
+                command_output(&path.to_string_lossy(), &["-version"])
+                    .and_then(|output| runtime::java_major(&output))
+                    == Some(*major)
+            })
+        })
+        .collect::<Vec<_>>();
     let playit =
         find_playit().or_else(|| bundled_playit_path(&app).ok().filter(|path| path.is_file()));
     let data_directory = app_servers_dir(&app)?.to_string_lossy().into_owned();
@@ -722,20 +775,29 @@ fn server_settings(app: AppHandle, id: String) -> Result<ServerSettings, String>
     safe_id(&id)?;
     let contents = fs::read_to_string(app_servers_dir(&app)?.join(&id).join("server.properties"))
         .map_err(|error| format!("Could not read server.properties: {error}"))?;
-    let keep_inventory = fs::read_to_string(app_servers_dir(&app)?.join(&id).join(".crewship-settings.json"))
-        .ok()
-        .and_then(|value| serde_json::from_str::<Value>(&value).ok())
-        .and_then(|value| value.get("keepInventory").and_then(Value::as_bool))
-        .unwrap_or(false);
+    let keep_inventory = fs::read_to_string(
+        app_servers_dir(&app)?
+            .join(&id)
+            .join(".crewship-settings.json"),
+    )
+    .ok()
+    .and_then(|value| serde_json::from_str::<Value>(&value).ok())
+    .and_then(|value| value.get("keepInventory").and_then(Value::as_bool))
+    .unwrap_or(false);
     Ok(ServerSettings {
-        max_players: property_value(&contents, "max-players", "20").parse().unwrap_or(20),
+        max_players: property_value(&contents, "max-players", "20")
+            .parse()
+            .unwrap_or(20),
         gamemode: property_value(&contents, "gamemode", "survival"),
         difficulty: property_value(&contents, "difficulty", "easy"),
         white_list: property_value(&contents, "white-list", "false") == "true",
         allow_flight: property_value(&contents, "allow-flight", "false") == "true",
         force_gamemode: property_value(&contents, "force-gamemode", "false") == "true",
-        spawn_protection: property_value(&contents, "spawn-protection", "16").parse().unwrap_or(16),
-        require_resource_pack: property_value(&contents, "require-resource-pack", "false") == "true",
+        spawn_protection: property_value(&contents, "spawn-protection", "16")
+            .parse()
+            .unwrap_or(16),
+        require_resource_pack: property_value(&contents, "require-resource-pack", "false")
+            == "true",
         resource_pack: property_value(&contents, "resource-pack", ""),
         resource_pack_prompt: property_value(&contents, "resource-pack-prompt", ""),
         keep_inventory,
@@ -743,7 +805,11 @@ fn server_settings(app: AppHandle, id: String) -> Result<ServerSettings, String>
 }
 
 #[tauri::command]
-fn save_server_settings(app: AppHandle, id: String, settings: ServerSettings) -> Result<(), String> {
+fn save_server_settings(
+    app: AppHandle,
+    id: String,
+    settings: ServerSettings,
+) -> Result<(), String> {
     safe_id(&id)?;
     if settings.max_players == 0 || settings.max_players > 500 {
         return Err("Player slots must be between 1 and 500.".into());
@@ -751,10 +817,16 @@ fn save_server_settings(app: AppHandle, id: String, settings: ServerSettings) ->
     if settings.spawn_protection > 128 {
         return Err("Spawn protection must be between 0 and 128.".into());
     }
-    if !matches!(settings.gamemode.as_str(), "survival" | "creative" | "adventure" | "spectator") {
+    if !matches!(
+        settings.gamemode.as_str(),
+        "survival" | "creative" | "adventure" | "spectator"
+    ) {
         return Err("Choose a valid game mode.".into());
     }
-    if !matches!(settings.difficulty.as_str(), "peaceful" | "easy" | "normal" | "hard") {
+    if !matches!(
+        settings.difficulty.as_str(),
+        "peaceful" | "easy" | "normal" | "hard"
+    ) {
         return Err("Choose a valid difficulty.".into());
     }
     let path = app_servers_dir(&app)?.join(&id).join("server.properties");
@@ -766,28 +838,55 @@ fn save_server_settings(app: AppHandle, id: String, settings: ServerSettings) ->
         ("allow-flight", settings.allow_flight.to_string()),
         ("force-gamemode", settings.force_gamemode.to_string()),
         ("spawn-protection", settings.spawn_protection.to_string()),
-        ("require-resource-pack", settings.require_resource_pack.to_string()),
+        (
+            "require-resource-pack",
+            settings.require_resource_pack.to_string(),
+        ),
         ("resource-pack", settings.resource_pack),
         ("resource-pack-prompt", settings.resource_pack_prompt),
     ] {
         set_server_property(&path, key, &value)?;
     }
-    let sidecar = app_servers_dir(&app)?.join(&id).join(".crewship-settings.json");
-    fs::write(sidecar, serde_json::json!({ "keepInventory": settings.keep_inventory }).to_string())
-        .map_err(|error| format!("Could not save Crew.Ship settings: {error}"))?;
+    let sidecar = app_servers_dir(&app)?
+        .join(&id)
+        .join(".crewship-settings.json");
+    fs::write(
+        sidecar,
+        serde_json::json!({ "keepInventory": settings.keep_inventory }).to_string(),
+    )
+    .map_err(|error| format!("Could not save Crew.Ship settings: {error}"))?;
     Ok(())
 }
 
 #[tauri::command]
-fn send_server_command(id: String, command: String, state: State<'_, HostState>) -> Result<(), String> {
+fn send_server_command(
+    id: String,
+    command: String,
+    state: State<'_, HostState>,
+) -> Result<(), String> {
     safe_id(&id)?;
-    let mut servers = state.servers.lock().map_err(|_| "The local server manager is unavailable.".to_owned())?;
-    let managed = servers.get_mut(&id).ok_or("Start this server before sending commands.")?;
-    if managed.child.try_wait().map_err(|error| error.to_string())?.is_some() {
+    let mut servers = state
+        .servers
+        .lock()
+        .map_err(|_| "The local server manager is unavailable.".to_owned())?;
+    let managed = servers
+        .get_mut(&id)
+        .ok_or("Start this server before sending commands.")?;
+    if managed
+        .child
+        .try_wait()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
         return Err("This server is not running.".into());
     }
-    let stdin = managed.stdin.as_mut().ok_or("The server console is unavailable.")?;
-    stdin.write_all(command.trim().as_bytes()).map_err(|error| error.to_string())?;
+    let stdin = managed
+        .stdin
+        .as_mut()
+        .ok_or("The server console is unavailable.")?;
+    stdin
+        .write_all(command.trim().as_bytes())
+        .map_err(|error| error.to_string())?;
     stdin.write_all(b"\n").map_err(|error| error.to_string())?;
     stdin.flush().map_err(|error| error.to_string())
 }
@@ -800,8 +899,11 @@ fn server_address(app: AppHandle, id: String) -> Result<ServerAddress, String> {
     Ok(ServerAddress {
         lan_address: local_ip().map(|address| format!("{address}:{port}")),
         public_address: fs::read_to_string(properties.with_file_name(".crewship-public-address"))
-            .ok().and_then(|v| runtime::public_address(&v).ok()).filter(|v| !v.is_empty()),
+            .ok()
+            .and_then(|v| runtime::public_address(&v).ok())
+            .filter(|v| !v.is_empty()),
         port,
+        playit_configured: configured_playit_secret(&app)?.is_some(),
     })
 }
 
@@ -810,7 +912,9 @@ fn save_public_address(app: AppHandle, id: String, address: String) -> Result<()
     safe_id(&id)?;
     let address = runtime::public_address(&address)?;
     let directory = app_servers_dir(&app)?.join(id);
-    if !directory.is_dir() { return Err("Server folder is missing.".into()); }
+    if !directory.is_dir() {
+        return Err("Server folder is missing.".into());
+    }
     fs::write(directory.join(".crewship-public-address"), address).map_err(|e| e.to_string())
 }
 
@@ -821,7 +925,9 @@ fn read_log_stream<R: std::io::Read + Send + 'static>(
 ) {
     thread::spawn(move || {
         for line in BufReader::new(reader).lines().map_while(Result::ok) {
-            if runtime::ready_line(&line) { ready.store(true, std::sync::atomic::Ordering::Relaxed); }
+            if runtime::ready_line(&line) {
+                ready.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             if let Ok(mut buffer) = logs.lock() {
                 if buffer.len() >= 1_000 {
                     buffer.pop_front();
@@ -878,7 +984,9 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
             .map_err(|error| error.to_string())?
             .is_none()
         {
-            if existing.stopping { return Err("The server is still stopping. Wait for it to finish saving.".into()); }
+            if existing.stopping {
+                return Err("The server is still stopping. Wait for it to finish saving.".into());
+            }
             return Ok(ProcessStatus {
                 running: true,
                 ready: existing.ready.load(std::sync::atomic::Ordering::Relaxed),
@@ -907,31 +1015,31 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
                 java.args(["@user_jvm_args.txt", &arguments, "nogui"]);
                 java
             } else {
-            // `canonicalize` returns an extended-length `\\?\C:\...` path on
-            // Windows. Java accepts that form, but cmd.exe does not treat it as
-            // an executable batch-file name. Pass the ordinary path to cmd.
-            let native_path = launch_path.to_string_lossy();
-            let display_path = native_path
-                .strip_prefix(r"\\?\")
-                .unwrap_or(native_path.as_ref())
-                .to_owned();
-            if !Path::new(&display_path).is_file() {
-                return Err(format!(
-                    "The {} launch script is missing. Reinstall this server.",
-                    config.software
-                ));
-            }
-            let mut script = Command::new("cmd.exe");
-            // Give cmd each token separately. Letting Rust quote the path avoids
-            // the literal `\\\"C:\\...` command seen in older builds when the
-            // Crew.Ship data folder contains spaces.
-            script
-                .arg("/D")
-                .arg("/C")
-                .arg("call")
-                .arg(display_path)
-                .arg("nogui");
-            script
+                // `canonicalize` returns an extended-length `\\?\C:\...` path on
+                // Windows. Java accepts that form, but cmd.exe does not treat it as
+                // an executable batch-file name. Pass the ordinary path to cmd.
+                let native_path = launch_path.to_string_lossy();
+                let display_path = native_path
+                    .strip_prefix(r"\\?\")
+                    .unwrap_or(native_path.as_ref())
+                    .to_owned();
+                if !Path::new(&display_path).is_file() {
+                    return Err(format!(
+                        "The {} launch script is missing. Reinstall this server.",
+                        config.software
+                    ));
+                }
+                let mut script = Command::new("cmd.exe");
+                // Give cmd each token separately. Letting Rust quote the path avoids
+                // the literal `\\\"C:\\...` command seen in older builds when the
+                // Crew.Ship data folder contains spaces.
+                script
+                    .arg("/D")
+                    .arg("/C")
+                    .arg("call")
+                    .arg(display_path)
+                    .arg("nogui");
+                script
             }
         }
         #[cfg(not(windows))]
@@ -950,9 +1058,15 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
     hidden(&mut command);
     if let Some(bin) = java_path.parent() {
         let mut paths = vec![bin.to_path_buf()];
-        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
-        if let Ok(path) = std::env::join_paths(paths) { command.env("PATH", path); }
-        if let Some(home) = bin.parent() { command.env("JAVA_HOME", home); }
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        if let Ok(path) = std::env::join_paths(paths) {
+            command.env("PATH", path);
+        }
+        if let Some(home) = bin.parent() {
+            command.env("JAVA_HOME", home);
+        }
     }
     command
         .current_dir(directory)
@@ -980,18 +1094,33 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         .and_then(|value| serde_json::from_str::<Value>(&value).ok())
         .and_then(|value| value.get("keepInventory").and_then(Value::as_bool))
         .unwrap_or(false);
-    servers.insert(config.id.clone(), ManagedServer { child, stdin, logs: Arc::clone(&logs), ready: Arc::clone(&ready), stopping: false });
+    servers.insert(
+        config.id.clone(),
+        ManagedServer {
+            child,
+            stdin,
+            logs: Arc::clone(&logs),
+            ready: Arc::clone(&ready),
+            stopping: false,
+        },
+    );
     // Let launchers report an immediate configuration or Java failure instead
     // of claiming the world is running. The console remains available in either
     // case, so users can see the real loader error.
     thread::sleep(Duration::from_millis(700));
-    let managed = servers.get_mut(&config.id).ok_or("Server state disappeared.")?;
-    let exit_status = managed.child.try_wait().map_err(|error| error.to_string())?;
+    let managed = servers
+        .get_mut(&config.id)
+        .ok_or("Server state disappeared.")?;
+    let exit_status = managed
+        .child
+        .try_wait()
+        .map_err(|error| error.to_string())?;
     let running = exit_status.is_none();
     let exit_code = exit_status.and_then(|status| status.code());
     if running {
         if let Some(stdin) = managed.stdin.as_mut() {
-            let _ = stdin.write_all(format!("gamerule keepInventory {keep_inventory}\n").as_bytes());
+            let _ =
+                stdin.write_all(format!("gamerule keepInventory {keep_inventory}\n").as_bytes());
             let _ = stdin.flush();
         }
     }
@@ -1016,16 +1145,137 @@ fn delete_server(app: AppHandle, id: String, state: State<'_, HostState>) -> Res
             let _ = stdin.flush();
         }
         thread::sleep(Duration::from_millis(250));
-        if managed.child.try_wait().map_err(|error| error.to_string())?.is_none() {
+        if managed
+            .child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_none()
+        {
             let _ = managed.child.kill();
             let _ = managed.child.wait();
         }
     }
     let target = app_servers_dir(&app)?.join(&id);
     if target.exists() {
-        fs::remove_dir_all(&target).map_err(|error| format!("Could not remove this server's files: {error}"))?;
+        fs::remove_dir_all(&target)
+            .map_err(|error| format!("Could not remove this server's files: {error}"))?;
     }
     Ok(())
+}
+
+fn server_is_running(id: &str, state: &HostState) -> Result<bool, String> {
+    let mut servers = state
+        .servers
+        .lock()
+        .map_err(|_| "State lock failed.".to_owned())?;
+    let Some(server) = servers.get_mut(id) else {
+        return Ok(false);
+    };
+    Ok(server
+        .child
+        .try_wait()
+        .map_err(|error| error.to_string())?
+        .is_none())
+}
+
+#[tauri::command]
+fn list_backups(app: AppHandle, id: String) -> Result<Vec<BackupItem>, String> {
+    safe_id(&id)?;
+    let directory = app_backups_dir(&app, &id)?;
+    if !directory.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut backups = fs::read_dir(&directory)
+        .map_err(|error| format!("Could not read backups: {error}"))?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("zip") {
+                return None;
+            }
+            let metadata = entry.metadata().ok()?;
+            let created_at = metadata
+                .modified()
+                .ok()?
+                .duration_since(UNIX_EPOCH)
+                .ok()?
+                .as_secs();
+            let name = path.file_name()?.to_str()?.to_owned();
+            Some(BackupItem {
+                id: name.trim_end_matches(".zip").to_owned(),
+                name,
+                path: path.to_string_lossy().into_owned(),
+                size_bytes: metadata.len(),
+                created_at,
+            })
+        })
+        .collect::<Vec<_>>();
+    backups.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+    Ok(backups)
+}
+
+#[tauri::command]
+fn create_backup(
+    app: AppHandle,
+    id: String,
+    state: State<'_, HostState>,
+) -> Result<BackupItem, String> {
+    safe_id(&id)?;
+    if server_is_running(&id, &state)? {
+        return Err(
+            "Stop the server and wait for it to finish saving before creating a backup.".into(),
+        );
+    }
+    let source = app_servers_dir(&app)?.join(&id);
+    if !source.is_dir() {
+        return Err("Server folder is missing.".into());
+    }
+    let directory = app_backups_dir(&app, &id)?;
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Could not create backup storage: {error}"))?;
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_secs();
+    let backup_id = format!("{id}-{created_at}");
+    let filename = format!("{backup_id}.zip");
+    let destination = directory.join(&filename);
+    let temporary = directory.join(format!("{backup_id}.partial.zip"));
+    let mut command = Command::new("tar.exe");
+    hidden(&mut command);
+    let status = command
+        .args(["-a", "-c", "-f"])
+        .arg(&temporary)
+        .args(["-C"])
+        .arg(&source)
+        .arg(".")
+        .status()
+        .map_err(|error| format!("Could not start Windows backup tool: {error}"))?;
+    if !status.success() || !temporary.is_file() {
+        let _ = fs::remove_file(&temporary);
+        return Err("Windows could not create the backup zip. Make sure tar.exe is available and try again.".into());
+    }
+    fs::rename(&temporary, &destination)
+        .map_err(|error| format!("Could not finish the backup: {error}"))?;
+    let size_bytes = fs::metadata(&destination)
+        .map_err(|error| error.to_string())?
+        .len();
+    Ok(BackupItem {
+        id: backup_id,
+        name: filename,
+        path: destination.to_string_lossy().into_owned(),
+        size_bytes,
+        created_at,
+    })
+}
+
+#[tauri::command]
+fn backups_directory(app: AppHandle, id: String) -> Result<String, String> {
+    safe_id(&id)?;
+    let directory = app_backups_dir(&app, &id)?;
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("Could not create backup storage: {error}"))?;
+    Ok(directory.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -1106,50 +1356,83 @@ fn install_modrinth_addon(
     };
     let loaders = serde_json::to_string(&loader_filters).map_err(|error| error.to_string())?;
     let game_versions =
-        serde_json::to_string(&vec![game_version]).map_err(|error| error.to_string())?;
+        serde_json::to_string(&vec![game_version.clone()]).map_err(|error| error.to_string())?;
     let client = reqwest::blocking::Client::builder()
         .user_agent("Crew.Ship/0.5 (https://github.com/VirtualFox3/Crew.Ship)")
         .build()
         .map_err(|error| format!("Could not create the catalog client: {error}"))?;
-    let versions: Vec<ModrinthVersion> = client
-        .get(format!(
-            "https://api.modrinth.com/v2/project/{project_id}/version"
-        ))
-        .query(&[
-            ("loaders", loaders.as_str()),
-            ("game_versions", game_versions.as_str()),
-        ])
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|error| format!("Could not resolve a compatible Modrinth release: {error}"))?
-        .json()
-        .map_err(|error| format!("Modrinth returned an invalid release: {error}"))?;
-    let version = versions.into_iter().next().ok_or_else(|| {
-        "No compatible release exists for this server version and loader.".to_string()
-    })?;
-    let file = version
-        .files
-        .iter()
-        .find(|file| file.primary.unwrap_or(false))
-        .or_else(|| version.files.first())
-        .ok_or_else(|| "The selected release has no downloadable file.".to_string())?;
-    let safe_filename = Path::new(&file.filename)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| name.ends_with(".jar"))
-        .ok_or_else(|| "Modrinth returned an unsafe or unsupported filename.".to_string())?;
+    // Resolve required dependencies before writing anything. A successful
+    // button press should not leave a server with only half a modpack.
+    let mut pending = vec![project_id];
+    let mut visited = HashSet::new();
+    let mut resolved = Vec::<(String, String, String)>::new();
+    while let Some(project) = pending.pop() {
+        if !visited.insert(project.clone()) {
+            continue;
+        }
+        if visited.len() > 40 {
+            return Err("This add-on has too many required dependencies to install safely.".into());
+        }
+        let versions: Vec<ModrinthVersion> = client
+            .get(format!(
+                "https://api.modrinth.com/v2/project/{project}/version"
+            ))
+            .query(&[
+                ("loaders", loaders.as_str()),
+                ("game_versions", game_versions.as_str()),
+            ])
+            .send()
+            .and_then(|response| response.error_for_status())
+            .map_err(|error| format!("Could not resolve a compatible Modrinth release: {error}"))?
+            .json()
+            .map_err(|error| format!("Modrinth returned an invalid release: {error}"))?;
+        let version = versions.into_iter().next().ok_or_else(|| {
+            format!("No compatible release exists for required project {project} on Minecraft {game_version} and {loader}.")
+        })?;
+        let file = version
+            .files
+            .iter()
+            .find(|file| file.primary.unwrap_or(false))
+            .or_else(|| version.files.first())
+            .ok_or_else(|| "The selected release has no downloadable file.".to_string())?;
+        let safe_filename = Path::new(&file.filename)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| name.ends_with(".jar"))
+            .ok_or_else(|| "Modrinth returned an unsafe or unsupported filename.".to_string())?;
+        for dependency in &version.dependencies {
+            if dependency.dependency_type == "required" {
+                let dependency_project = dependency.project_id.clone().ok_or_else(|| {
+                    format!("{} has a required dependency that Modrinth cannot resolve automatically. Install it manually before retrying.", version.name)
+                })?;
+                pending.push(dependency_project);
+            }
+        }
+        resolved.push((version.name, safe_filename.to_owned(), file.url.clone()));
+    }
     let directory = app_servers_dir(&app)?.join(server_id).join(directory_name);
     fs::create_dir_all(&directory)
         .map_err(|error| format!("Could not create the add-on directory: {error}"))?;
-    let bytes = http_get(&file.url)?
-        .bytes()
-        .map_err(|error| format!("Could not download the add-on: {error}"))?;
-    fs::write(directory.join(safe_filename), &bytes)
-        .map_err(|error| format!("Could not install the add-on: {error}"))?;
+    let root_name = resolved
+        .first()
+        .map(|(name, _, _)| name.clone())
+        .ok_or("No add-on was resolved.")?;
+    let root_filename = resolved
+        .first()
+        .map(|(_, filename, _)| filename.clone())
+        .ok_or("No add-on was resolved.")?;
+    for (_, filename, url) in &resolved {
+        let bytes = http_get(url)?
+            .bytes()
+            .map_err(|error| format!("Could not download the add-on: {error}"))?;
+        fs::write(directory.join(filename), &bytes)
+            .map_err(|error| format!("Could not install the add-on: {error}"))?;
+    }
     Ok(InstalledAddon {
-        name: version.name,
-        filename: safe_filename.to_owned(),
+        name: root_name,
+        filename: root_filename,
         directory: directory.to_string_lossy().into_owned(),
+        installed_files: resolved.len() as u32,
     })
 }
 
@@ -1166,7 +1449,9 @@ fn server_status(id: String, state: State<'_, HostState>) -> Result<ProcessStatu
     let exit = server.child.try_wait().map_err(|error| error.to_string())?;
     Ok(ProcessStatus {
         running: exit.is_none(),
-        ready: exit.is_none() && !server.stopping && server.ready.load(std::sync::atomic::Ordering::Relaxed),
+        ready: exit.is_none()
+            && !server.stopping
+            && server.ready.load(std::sync::atomic::Ordering::Relaxed),
         exit_code: exit.and_then(|status| status.code()),
     })
 }
@@ -1235,7 +1520,12 @@ fn start_playit(
     }
     let mut command = Command::new(executable);
     hidden(&mut command);
-    command.args(["--secret-path", secret_path.to_string_lossy().as_ref(), "--log-path", playit_log_path(&app)?.to_string_lossy().as_ref()]);
+    command.args([
+        "--secret-path",
+        secret_path.to_string_lossy().as_ref(),
+        "--log-path",
+        playit_log_path(&app)?.to_string_lossy().as_ref(),
+    ]);
     *playit = Some(
         command
             .stdin(Stdio::null())
@@ -1248,12 +1538,21 @@ fn start_playit(
 }
 
 #[tauri::command]
-fn configure_playit(app: AppHandle, secret: String, state: State<'_, HostState>) -> Result<(), String> {
+fn configure_playit(
+    app: AppHandle,
+    secret: String,
+    state: State<'_, HostState>,
+) -> Result<(), String> {
     let secret = secret.trim();
     if !playit_secret_is_valid(secret) {
         return Err("That does not look like a Playit agent secret. Paste the hexadecimal agent secret from Playit, not your Playit password or public server address.".into());
     }
-    if let Some(mut process) = state.playit.lock().map_err(|_| "State lock failed.")?.take() {
+    if let Some(mut process) = state
+        .playit
+        .lock()
+        .map_err(|_| "State lock failed.")?
+        .take()
+    {
         let _ = process.kill();
         let _ = process.wait();
     }
@@ -1311,6 +1610,9 @@ pub fn run() {
             save_server_settings,
             server_address,
             save_public_address,
+            list_backups,
+            create_backup,
+            backups_directory,
             start_server,
             stop_server,
             send_server_command,

@@ -35,11 +35,12 @@ type InstalledServer = {
 };
 
 type ProcessStatus = { running: boolean; ready: boolean; exitCode?: number | null };
-type ServerAddress = { lanAddress?: string; publicAddress?: string; port: number };
+type ServerAddress = { lanAddress?: string; publicAddress?: string; port: number; playitConfigured?: boolean };
 const joinAddress = (address?: ServerAddress) => address?.publicAddress || address?.lanAddress;
+type BackupItem = { id: string; name: string; path: string; sizeBytes: number; createdAt: number };
 type AddonKind = "mod" | "plugin";
 type AddonResult = { id: string; title: string; description: string; iconUrl?: string; downloads: number };
-type InstalledAddon = { name: string; filename: string; directory: string };
+type InstalledAddon = { name: string; filename: string; directory: string; installedFiles: number };
 type Profile = { username: string; display_name?: string | null; avatar_url?: string | null };
 type CrewMember = { user_id: string; role: "admin" | "moderator" | "viewer"; permissions?: string[] | null; profiles?: Profile | null };
 type ServerInvite = { token: string; expires_at: string };
@@ -121,6 +122,7 @@ function App() {
   const [running, setRunning] = useState<Record<string, boolean>>({});
   const [ready, setReady] = useState<Record<string, boolean>>({});
   const [addresses, setAddresses] = useState<Record<string, ServerAddress>>({});
+  const [backups, setBackups] = useState<BackupItem[]>([]);
   const [busy, setBusy] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const [error, setError] = useState<string>();
@@ -245,6 +247,14 @@ function App() {
     setAddresses(Object.fromEntries(nextAddresses));
   }
 
+  async function refreshBackups(serverId: string) {
+    try {
+      setBackups(await invoke<BackupItem[]>("list_backups", { id: serverId }));
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  }
+
   useEffect(() => {
     void refreshSystem();
   }, []);
@@ -284,6 +294,10 @@ function App() {
     const timer = window.setInterval(() => void load().catch(() => undefined), 1_500);
     return () => window.clearInterval(timer);
   }, [view, activeServer, serverTab]);
+
+  useEffect(() => {
+    if (view === "server" && serverTab === "backups" && activeServer) void refreshBackups(activeServer.id);
+  }, [view, serverTab, activeServer?.id]);
 
   useEffect(() => {
     localStorage.setItem(THEME_KEY, theme);
@@ -488,7 +502,21 @@ function App() {
         gameVersion: target.gameVersion,
         loader: target.software,
       });
-      setNotice(`${installed.name} installed to ${target.name}. Restart the server to load it.`);
+      setNotice(`${installed.name}${installed.installedFiles > 1 ? ` and ${installed.installedFiles - 1} required dependencies` : ""} installed to ${target.name}. Restart the server to load it.`);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function createBackup(server: InstalledServer) {
+    setBusy(`backup-${server.id}`);
+    setError(undefined);
+    try {
+      const backup = await invoke<BackupItem>("create_backup", { id: server.id });
+      await refreshBackups(server.id);
+      setNotice(`Backup created: ${backup.name}`);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -761,7 +789,7 @@ function App() {
                 {(["server", "options", "console", "log", "players", "software", "files", "worlds", "backups", "access"] as ServerTab[]).map((tab) => <button key={tab} className={serverTab === tab ? "active" : ""} onClick={() => void openServer(activeServer, tab)}>{serverTabIcon(tab)} {serverTabLabel(tab)}</button>)}
               </aside>
               <section className="server-detail-panel">
-                {serverTab === "server" && <div className="detail-overview"><span className={`status-dot ${ready[activeServer.id] ? "online" : ""}`} /><h2>{ready[activeServer.id] ? "Online" : running[activeServer.id] ? "Starting / stopping" : "Offline"}</h2><p>{ready[activeServer.id] ? "Minecraft is ready for players." : running[activeServer.id] ? "Minecraft has not confirmed readiness. Check Console for progress." : "Start this server to accept players."}</p><div className="detail-actions"><button className="ghost" onClick={() => void openServer(activeServer, "console")}>OPEN CONSOLE</button><button className="ghost" onClick={() => void openServer(activeServer, "options")}>SERVER OPTIONS</button><button className="ghost" onClick={() => void openServer(activeServer, "access")}>SHARE ACCESS</button></div><form key={activeServer.id} className="public-address-form" onSubmit={async (event) => { event.preventDefault(); const address = String(new FormData(event.currentTarget).get("publicAddress") ?? ""); try { await invoke("save_public_address", { id: activeServer.id, address }); await refreshStatuses(); setNotice("Public address saved. Confirm Playit forwards to this server's local port."); } catch (cause) { setError(errorMessage(cause)); } }}><label htmlFor="public-address">Playit public address</label><p>Map your tunnel to local port {addresses[activeServer.id]?.port ?? "…"}. Paste the public hostname and port Playit gives you. Leave blank to use LAN.</p><input id="public-address" name="publicAddress" defaultValue={addresses[activeServer.id]?.publicAddress ?? ""} placeholder="example.craft.playit.gg:12345" /><button className="primary" type="submit">SAVE ADDRESS</button></form></div>}
+                {serverTab === "server" && <div className="detail-overview"><span className={`status-dot ${ready[activeServer.id] ? "online" : ""}`} /><h2>{ready[activeServer.id] ? "Online" : running[activeServer.id] ? "Starting / stopping" : "Offline"}</h2><p>{ready[activeServer.id] ? "Minecraft is ready for players." : running[activeServer.id] ? "Minecraft has not confirmed readiness. Check Console for progress." : "Start this server to accept players."}</p><div className="detail-actions"><button className="ghost" onClick={() => void openServer(activeServer, "console")}>OPEN CONSOLE</button><button className="ghost" onClick={() => void openServer(activeServer, "options")}>SERVER OPTIONS</button><button className="ghost" onClick={() => void openServer(activeServer, "access")}>SHARE ACCESS</button></div><form key={activeServer.id} className="public-address-form" onSubmit={async (event) => { event.preventDefault(); const address = String(new FormData(event.currentTarget).get("publicAddress") ?? ""); try { await invoke("save_public_address", { id: activeServer.id, address }); await refreshStatuses(); setNotice("Public Playit address saved for this server. Players can use it once the tunnel forwards to this local port."); } catch (cause) { setError(errorMessage(cause)); } }}><label htmlFor="public-address">PUBLIC SERVER ADDRESS</label><p>{addresses[activeServer.id]?.playitConfigured ? "Playit is connected on this computer. Create a Minecraft Java tunnel for this server's local port, then paste the assigned address here." : "Connect Playit in Ship settings first, then create a Minecraft Java tunnel for this local port."} Local port: <b>{addresses[activeServer.id]?.port ?? "…"}</b>. You can name the server anything in Crew.Ship, but only Playit or a domain you own can provide a real public address.</p><input id="public-address" name="publicAddress" defaultValue={addresses[activeServer.id]?.publicAddress ?? ""} placeholder="fnaf.example.playit.gg:12345" /><button className="primary" type="submit" disabled={!addresses[activeServer.id]?.playitConfigured}>SAVE PLAYIT ADDRESS</button></form></div>}
                 {serverTab === "options" && (settingsDraft ? <div className="property-editor"><div className="property-heading"><span>SERVER.PROPERTIES</span><p>Saved locally. Restart the server to apply startup settings.</p></div><div className="property-grid"><NumberProperty label="Slots" value={settingsDraft.maxPlayers} min={1} max={500} onChange={(maxPlayers) => setSettingsDraft({ ...settingsDraft, maxPlayers })} /><SelectProperty label="Gamemode" value={settingsDraft.gamemode} choices={["survival", "creative", "adventure", "spectator"]} onChange={(gamemode) => setSettingsDraft({ ...settingsDraft, gamemode })} /><SelectProperty label="Difficulty" value={settingsDraft.difficulty} choices={["peaceful", "easy", "normal", "hard"]} onChange={(difficulty) => setSettingsDraft({ ...settingsDraft, difficulty })} /><ToggleProperty label="Whitelist" hint="Only approved players may join." value={settingsDraft.whiteList} onChange={(whiteList) => setSettingsDraft({ ...settingsDraft, whiteList })} /><ToggleProperty label="Keep inventory" hint="Players keep items after death." value={settingsDraft.keepInventory} onChange={(keepInventory) => setSettingsDraft({ ...settingsDraft, keepInventory })} /><ToggleProperty label="Fly" hint="Allow flight without a kick." value={settingsDraft.allowFlight} onChange={(allowFlight) => setSettingsDraft({ ...settingsDraft, allowFlight })} /><ToggleProperty label="Force gamemode" hint="Apply selected gamemode on join." value={settingsDraft.forceGamemode} onChange={(forceGamemode) => setSettingsDraft({ ...settingsDraft, forceGamemode })} /><NumberProperty label="Spawn protection" value={settingsDraft.spawnProtection} min={0} max={128} onChange={(spawnProtection) => setSettingsDraft({ ...settingsDraft, spawnProtection })} /><ToggleProperty label="Resource pack required" hint="Require the pack URL below." value={settingsDraft.requireResourcePack} onChange={(requireResourcePack) => setSettingsDraft({ ...settingsDraft, requireResourcePack })} /><label className="property-field"><span>RESOURCE PACK URL</span><input value={settingsDraft.resourcePack} onChange={(event) => setSettingsDraft({ ...settingsDraft, resourcePack: event.target.value })} placeholder="https://example.com/pack.zip" /></label><label className="property-field"><span>RESOURCE PACK PROMPT</span><input value={settingsDraft.resourcePackPrompt} onChange={(event) => setSettingsDraft({ ...settingsDraft, resourcePackPrompt: event.target.value })} placeholder="Optional message for players" /></label></div><button className="primary" disabled={busy === "server-settings"} onClick={() => void saveServerSettings()}>{busy === "server-settings" ? "SAVING…" : "SAVE OPTIONS"}</button></div> : <div className="market-empty"><span>⌛</span><h2>Loading options</h2></div>)}
                 {serverTab === "console" && <div className="console-page"><header><span className="status-dot online" /><b>{activeServer.name} / CONSOLE</b></header><pre>{logs.length ? logs.join("\n") : "Start the server to see console output."}</pre><form onSubmit={sendConsoleCommand}><input value={consoleCommand} onChange={(event) => setConsoleCommand(event.target.value)} placeholder={running[activeServer.id] ? "Type a Minecraft command…" : "Start server to send commands"} disabled={!running[activeServer.id]} /><button className="primary" disabled={!running[activeServer.id]}>SEND</button></form></div>}
                 {serverTab === "log" && <div className="console-page read-only"><header><b>LIVE LOG</b><button className="ghost" onClick={() => void openPath(activeServer.jarPath.substring(0, Math.max(activeServer.jarPath.lastIndexOf("\\"), activeServer.jarPath.lastIndexOf("/"))))}>OPEN LOG FOLDER</button></header><pre>{logs.length ? logs.join("\n") : "Logs will appear once the server starts."}</pre></div>}
@@ -769,7 +797,7 @@ function App() {
                 {serverTab === "software" && <div className="detail-section"><h2>{softwareName(activeServer.software ?? "fabric")}</h2><p>Minecraft {activeServer.gameVersion} · build {activeServer.loaderVersion}</p><p>{["fabric", "forge", "neoforge"].includes(activeServer.software ?? "") ? "This server accepts compatible mods from Marketplace." : ["paper", "purpur"].includes(activeServer.software ?? "") ? "This server accepts compatible plugins from Marketplace." : "Vanilla has no add-on loader."}</p><button className="primary" onClick={() => setView("marketplace")}>OPEN MARKETPLACE</button></div>}
                 {serverTab === "files" && <FolderPanel title="Server files" text="Open this server’s folder to manage configs, datapacks, and downloaded files." path={activeServer.jarPath} />}
                 {serverTab === "worlds" && <FolderPanel title="Worlds" text="Your worlds are stored locally in the server folder. Stop the server before manually replacing a world." path={activeServer.jarPath} />}
-                {serverTab === "backups" && <FolderPanel title="Backups" text="Create a copy of this server folder before modpack or world changes. Automatic zip backups are next on the local-host roadmap." path={activeServer.jarPath} />}
+                {serverTab === "backups" && <div className="detail-section"><h2>Backups</h2><p>Create a real ZIP copy of this server, including its world, properties, mods, plugins, and configuration. Stop the server first so Minecraft finishes saving.</p><div className="detail-actions"><button className="primary" disabled={running[activeServer.id] || busy === `backup-${activeServer.id}`} onClick={() => void createBackup(activeServer)}>{busy === `backup-${activeServer.id}` ? "CREATING BACKUP…" : "CREATE BACKUP"}</button><button className="ghost" onClick={async () => { try { await openPath(await invoke<string>("backups_directory", { id: activeServer.id })); } catch (cause) { setError(errorMessage(cause)); } }}>OPEN BACKUP FOLDER</button></div>{running[activeServer.id] && <p className="muted">Stop this server before creating a backup.</p>}<div className="backup-list">{backups.length ? backups.map((backup) => <article key={backup.id} className="backup-item"><div><b>{backup.name}</b><small>{new Date(backup.createdAt * 1000).toLocaleString()} · {(backup.sizeBytes / 1024 / 1024).toFixed(1)} MB</small></div><button className="ghost" onClick={() => void openPath(backup.path)}>OPEN</button></article>) : <p className="muted">No backups yet.</p>}</div></div>}
                 {serverTab === "access" && <div className="detail-section"><h2>Share access</h2><p>Invite a trusted person by Crew.Ship username or generate a one-use admin link. Their account controls their access—your world stays on this computer.</p><button className="primary" onClick={() => { setCrewServerId(activeServer.id); setView("crew"); }}>MANAGE ACCESS</button></div>}
               </section>
             </div>
