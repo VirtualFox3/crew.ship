@@ -1673,6 +1673,7 @@ pub fn run() {
         .manage(HostState::default())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|_app| {
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
             {

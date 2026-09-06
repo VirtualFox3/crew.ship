@@ -16,6 +16,7 @@ jobs:
       CREW_SHIP_CODE_SIGN_PFX_BASE64: ${{ secrets.CREW_SHIP_CODE_SIGN_PFX_BASE64 }}
       CREW_SHIP_CODE_SIGN_PFX_PASSWORD: ${{ secrets.CREW_SHIP_CODE_SIGN_PFX_PASSWORD }}
       CREW_SHIP_TIMESTAMP_URL: ${{ secrets.CREW_SHIP_TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     defaults:
       run:
         working-directory: desktop
@@ -48,6 +49,7 @@ jobs:
           releaseBody: "Official Crew.Ship Desktop release. Native Windows Minecraft host with server options, console, local IP, files/worlds, access invites, Modrinth Marketplace, and bundled playit.gg. Runs on your own computer."
           releaseDraft: false
           prerelease: false
+          updaterJsonPreferNsis: true
       - name: Sign Windows installers
         if: ${{ env.CREW_SHIP_CODE_SIGN_PFX_BASE64 != '' && env.CREW_SHIP_CODE_SIGN_PFX_PASSWORD != '' }}
         shell: pwsh
