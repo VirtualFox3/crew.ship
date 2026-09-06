@@ -3,14 +3,6 @@ export const dynamic = "force-dynamic";
 const repository = "https://github.com/VirtualFox3/crew.ship";
 export async function GET(request: Request) {
   const msi = new URL(request.url).searchParams.get("format") === "msi";
-  // Public artifact hosting can be separate from the private source repository.
-  const hostedInstaller = msi ? process.env.CREWSHIP_WINDOWS_MSI_URL : process.env.CREWSHIP_WINDOWS_EXE_URL;
-  if (hostedInstaller) {
-    try {
-      const url = new URL(hostedInstaller);
-      if (url.protocol === "https:" && !url.username && !url.password) return NextResponse.redirect(url, 307);
-    } catch { /* Invalid configuration falls back to release discovery. */ }
-  }
   try {
     const response = await fetch("https://api.github.com/repos/VirtualFox3/crew.ship/releases?per_page=20", { next: { revalidate: 60 }, headers: { Accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(8000) });
     if (!response.ok) throw new Error("Releases unavailable");
