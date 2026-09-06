@@ -1623,6 +1623,25 @@ fn configure_playit(
 }
 
 #[tauri::command]
+fn disconnect_playit(app: AppHandle, state: State<'_, HostState>) -> Result<(), String> {
+    if let Some(mut process) = state
+        .playit
+        .lock()
+        .map_err(|_| "State lock failed.")?
+        .take()
+    {
+        let _ = process.kill();
+        let _ = process.wait();
+    }
+    let secret_path = playit_secret_path(&app)?;
+    if secret_path.exists() {
+        fs::remove_file(secret_path)
+            .map_err(|error| format!("Could not remove the local Playit secret: {error}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn stop_playit(state: State<'_, HostState>) -> Result<bool, String> {
     if let Some(mut process) = state
         .playit
@@ -1685,6 +1704,7 @@ pub fn run() {
             install_modrinth_addon,
             start_playit,
             configure_playit,
+            disconnect_playit,
             stop_playit
         ])
         .run(tauri::generate_context!())
