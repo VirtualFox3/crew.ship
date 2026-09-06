@@ -362,6 +362,13 @@ fn playit_api(path: &str, authorization: Option<&str>, body: Value) -> Result<Va
         request = request.header("Authorization", token);
     }
     let response = request.send().map_err(|error| format!("Playit is unavailable: {error}"))?;
+    if !response.status().is_success() {
+        return Err(match response.status().as_u16() {
+            401 => "That Playit setup code is invalid or expired. Generate a new Third Party App code in Playit, then paste it into Crew.Ship immediately.".into(),
+            429 => "Playit is temporarily rate-limiting requests. Wait a minute, generate a fresh setup code, then try again.".into(),
+            status => format!("Playit could not complete this request (HTTP {status}). Try again shortly."),
+        });
+    }
     let payload: Value = response.json().map_err(|error| format!("Playit returned an invalid response: {error}"))?;
     if payload.get("status").and_then(Value::as_str) == Some("success") {
         return Ok(payload.get("data").cloned().unwrap_or(Value::Null));
