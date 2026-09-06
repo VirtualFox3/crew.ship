@@ -357,7 +357,14 @@ fn playit_api(path: &str, authorization: Option<&str>, body: Value) -> Result<Va
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|error| format!("Could not prepare the Playit connection: {error}"))?;
-    let mut request = client.post(format!("{PLAYIT_API}{path}")).json(&body);
+    // Match Playit's first-party web client for the setup-code flow.  These
+    // harmless client-identification headers keep the API request shape
+    // consistent without sending any account data beyond the requested body.
+    let mut request = client
+        .post(format!("{PLAYIT_API}{path}"))
+        .header("x-ref-track", "crew.ship")
+        .header("x-web-version", "crew.ship")
+        .json(&body);
     if let Some(token) = authorization.filter(|value| !value.is_empty()) {
         request = request.header("Authorization", token);
     }
