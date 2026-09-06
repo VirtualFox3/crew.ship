@@ -187,7 +187,51 @@ fn java_for_game(game: &str) -> Result<PathBuf, String> {
             }
         }
     }
-    Err(format!("Minecraft {game} needs Java {major}. Install the 64-bit Java {major} runtime, then retry. Crew.Ship will find it automatically; it will not use an incompatible Java version."))
+    Err(format!("Minecraft {game} needs Java {major}."))
+}
+
+fn install_java_for_game(game: &str) -> Result<PathBuf, String> {
+    if let Ok(java) = java_for_game(game) {
+        return Ok(java);
+    }
+    let major = runtime::required_java(game)?;
+    // Temurin keeps current LTS and Java 8 runtimes at a stable public API.
+    // Java 16 is end-of-life and has no current public binary endpoint.
+    if major == 16 {
+        return Err("Minecraft 1.17 needs Java 16. Its upstream runtime is end-of-life, so install a 64-bit Java 16 runtime once, then Crew.Ship will use it automatically.".into());
+    }
+    let local = std::env::var_os("LOCALAPPDATA")
+        .ok_or("Could not locate Local AppData for the Java runtime.")?;
+    let root = PathBuf::from(local)
+        .join("Crew.Ship")
+        .join("runtimes")
+        .join(format!("java-{major}"));
+    fs::create_dir_all(&root)
+        .map_err(|error| format!("Could not prepare the Java runtime folder: {error}"))?;
+    let archive = root.join(format!(".temurin-{major}.zip"));
+    let endpoint = format!("https://api.adoptium.net/v3/binary/latest/{major}/ga/windows/x64/jre/hotspot/normal/eclipse");
+    let bytes = http_get(&endpoint)?
+        .bytes()
+        .map_err(|error| format!("Could not download Java {major}: {error}"))?;
+    fs::write(&archive, bytes).map_err(|error| format!("Could not save Java {major}: {error}"))?;
+    let mut extract = Command::new("tar.exe");
+    hidden(&mut extract);
+    let result = extract
+        .args(["-xf"])
+        .arg(&archive)
+        .args(["-C"])
+        .arg(&root)
+        .status();
+    let _ = fs::remove_file(&archive);
+    match result {
+        Ok(status) if status.success() => java_for_game(game).map_err(|_| {
+            format!("Java {major} downloaded but could not be verified. Try starting again.")
+        }),
+        Ok(_) => Err(format!(
+            "Windows could not unpack Java {major}. Try starting again."
+        )),
+        Err(error) => Err(format!("Could not run Windows' Java unpacker: {error}")),
+    }
 }
 
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
@@ -956,7 +1000,11 @@ fn loader_argument_file(directory: &Path, script_name: &str) -> Option<String> {
 }
 
 #[tauri::command]
-fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<ProcessStatus, String> {
+fn start_server(
+    config: StartConfig,
+    app: AppHandle,
+    state: State<'_, HostState>,
+) -> Result<ProcessStatus, String> {
     safe_id(&config.id)?;
     if !(1_024..=65_536).contains(&config.memory_mb) {
         return Err("Memory must be between 1024 MB and 65536 MB.".into());
@@ -996,7 +1044,12 @@ fn start_server(config: StartConfig, state: State<'_, HostState>) -> Result<Proc
         servers.remove(&config.id);
     }
 
-    let java_path = java_for_game(&config.game_version)?;
+    // Once an agent secret has been connected, keep the bundled Playit agent
+    // running automatically whenever one of this computer's servers starts.
+    if configured_playit_secret(&app)?.is_some() {
+        let _ = start_playit_process(&app, None, &state);
+    }
+    let java_path = install_java_for_game(&config.game_version)?;
     let installer_platform = matches!(config.software.as_str(), "forge" | "neoforge");
     let mut command = if installer_platform {
         fs::write(
@@ -1497,16 +1550,24 @@ fn start_playit(
     path: Option<String>,
     state: State<'_, HostState>,
 ) -> Result<bool, String> {
+    start_playit_process(&app, path, &state)
+}
+
+fn start_playit_process(
+    app: &AppHandle,
+    path: Option<String>,
+    state: &HostState,
+) -> Result<bool, String> {
     let executable = path
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
         .or_else(find_playit)
         .map(Ok)
-        .unwrap_or_else(|| ensure_playit(&app))?;
+        .unwrap_or_else(|| ensure_playit(app))?;
     if !executable.is_file() {
         return Err("The selected playit.gg executable does not exist.".into());
     }
-    let secret_path = configured_playit_secret(&app)?.ok_or("Playit needs an agent secret before it can connect. In Playit, create or select an agent on this computer, copy its agent secret, then paste it in Crew.Ship Host settings. Your Playit password is never needed here.")?;
+    let secret_path = configured_playit_secret(app)?.ok_or("Playit needs an agent secret before it can connect. In Playit, create or select an agent on this computer, copy its agent secret, then paste it in Crew.Ship Host settings. Your Playit password is never needed here.")?;
 
     let mut playit = state.playit.lock().map_err(|_| "State lock failed.")?;
     if let Some(process) = playit.as_mut() {
@@ -1524,7 +1585,7 @@ fn start_playit(
         "--secret-path",
         secret_path.to_string_lossy().as_ref(),
         "--log-path",
-        playit_log_path(&app)?.to_string_lossy().as_ref(),
+        playit_log_path(app)?.to_string_lossy().as_ref(),
     ]);
     *playit = Some(
         command
