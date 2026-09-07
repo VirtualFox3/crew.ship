@@ -390,8 +390,9 @@ fn playit_api(path: &str, authorization: Option<&str>, body: Value) -> Result<Va
     Err(detail.to_owned())
 }
 
-/// Playit's third-party setup code signs a client in with a Set-Cookie header.
-/// Their browser client relies on that cookie rather than a JSON session key.
+/// Apply a Playit login token and retain its session cookie.
+/// Third-party setup codes can be rejected with InvalidSignature here; do not
+/// disguise an unsupported exchange as an expired code.
 fn apply_playit_setup_code(code: &str) -> Result<String, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
@@ -405,11 +406,9 @@ fn apply_playit_setup_code(code: &str) -> Result<String, String> {
         .send()
         .map_err(|error| format!("Playit is unavailable: {error}"))?;
     if !response.status().is_success() {
-        return Err(match response.status().as_u16() {
-            401 => "That Playit setup code is invalid or expired. Generate a new Third Party App code in Playit, then paste it into Crew.Ship immediately.".into(),
-            429 => "Playit is temporarily rate-limiting requests. Wait a minute, generate a fresh setup code, then try again.".into(),
-            status => format!("Playit could not complete this request (HTTP {status}). Try again shortly."),
-        });
+        let status = response.status().as_u16();
+        let payload = response.json::<Value>().unwrap_or(Value::Null);
+        return Err(playit_login_error(status, &payload));
     }
     let cookie = response
         .headers()
@@ -421,6 +420,37 @@ fn apply_playit_setup_code(code: &str) -> Result<String, String> {
         .map(str::to_owned)
         .ok_or("Playit accepted the setup code but did not return an account session. Generate a fresh code and try again.")?;
     Ok(cookie)
+}
+
+fn playit_login_error(status: u16, payload: &Value) -> String {
+    if payload.pointer("/data/message").and_then(Value::as_str) == Some("InvalidSignature") {
+        return "Playit rejected this code type (InvalidSignature). Crew.Ship's setup-code exchange needs updating; generating another code will not fix this. Use an existing agent secret for now.".into();
+    }
+    match status {
+        401 => "Playit could not authenticate this code. The account was not linked.".into(),
+        429 => "Playit is temporarily rate-limiting requests. Wait a minute before trying again.".into(),
+        status => format!("Playit could not complete this request (HTTP {status}). Try again shortly."),
+    }
+}
+
+#[cfg(test)]
+mod playit_login_tests {
+    use super::*;
+
+    #[test]
+    fn signature_failure_is_not_reported_as_expiration() {
+        let payload = serde_json::json!({ "status": "error", "data": { "type": "auth", "message": "InvalidSignature" } });
+        let message = playit_login_error(401, &payload);
+        assert!(message.contains("InvalidSignature"));
+        assert!(!message.contains("expired"));
+    }
+
+    #[test]
+    fn error_messages_do_not_expose_response_secrets() {
+        let payload = serde_json::json!({ "data": { "message": "private-token-value" } });
+        assert!(!playit_login_error(401, &payload).contains("private-token-value"));
+        assert!(playit_login_error(429, &Value::Null).contains("rate-limiting"));
+    }
 }
 
 fn claim_code() -> String {
