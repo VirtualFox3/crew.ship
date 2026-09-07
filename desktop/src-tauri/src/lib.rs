@@ -1797,15 +1797,22 @@ fn configure_playit(
 /// Accept the short-lived code from Playit's “Third Party App” browser flow.
 /// The returned session is saved only in Crew.Ship's local app-data folder.
 #[tauri::command]
-fn configure_playit_setup_code(app: AppHandle, code: String) -> Result<(), String> {
+async fn configure_playit_setup_code(app: AppHandle, code: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || save_playit_setup_code(&app, &code))
+        .await
+        .map_err(|error| format!("The Playit connection task failed: {error}"))?
+}
+
+fn save_playit_setup_code(app: &AppHandle, code: &str) -> Result<bool, String> {
     let code = code.trim();
     if code.len() < 8 || code.len() > 512 {
         return Err("Paste the one-time setup code shown by Playit, not your password or public address.".into());
     }
     let session_cookie = apply_playit_setup_code(code)?;
-    let path = playit_session_path(&app)?;
+    let path = playit_session_path(app)?;
     fs::write(&path, serde_json::json!({ "session_cookie": session_cookie }).to_string())
-        .map_err(|error| format!("Could not save the local Playit connection: {error}"))
+        .map_err(|error| format!("Could not save the local Playit connection: {error}"))?;
+    Ok(true)
 }
 
 #[derive(Serialize)]
