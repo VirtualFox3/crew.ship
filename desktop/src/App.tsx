@@ -493,6 +493,7 @@ function App() {
       }
       setPlayitLinkMessage({ kind: "success", text: "Linked: true. Select START AGENT to connect it." });
       setPlayitClaim(undefined);
+      setPlayitRunning(false);
       await refreshSystem();
       setNotice("Playit agent linked. Select START AGENT to connect it.");
     } catch (cause) {
