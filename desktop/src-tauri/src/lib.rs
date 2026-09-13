@@ -6,6 +6,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs,
     io::{BufRead, BufReader, Write},
+    net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{Arc, Mutex},
@@ -94,6 +95,14 @@ struct ServerAddress {
     public_address: Option<String>,
     port: u16,
     playit_configured: bool,
+    tunnel_region: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PublicAddressProbe {
+    reachable: bool,
+    message: String,
 }
 
 #[derive(Serialize)]
@@ -448,7 +457,7 @@ fn playit_endpoint(tunnel: &Value) -> Option<String> {
 }
 
 /// Best-effort account-side provisioning. Failure must never stop local play.
-fn provision_playit_tunnel(app: &AppHandle, server_id: &str, software: &str, port: u16) -> Result<Option<String>, String> {
+fn provision_playit_tunnel(app: &AppHandle, server_id: &str, software: &str, port: u16, region: &str) -> Result<Option<String>, String> {
     let Some(session_key) = configured_playit_session(app)? else { return Ok(None); };
     let Some(agent_secret) = playit_secret_value(app)? else { return Ok(None); };
     let agent = playit_api("/agents/rundata", Some(&format!("Agent-Secret {agent_secret}")), serde_json::json!({}))?;
@@ -477,7 +486,7 @@ fn provision_playit_tunnel(app: &AppHandle, server_id: &str, software: &str, por
         "port_type": "tcp", "port_count": 1,
         "origin": { "type": "agent", "data": { "agent_id": agent_id, "local_ip": "127.0.0.1", "local_port": port } },
         "enabled": true,
-        "alloc": { "type": "region", "details": { "region": "global" } },
+        "alloc": { "type": "region", "details": { "region": region } },
         "firewall_id": null, "proxy_protocol": null
     }))?;
     let id = created.get("id").and_then(Value::as_str).ok_or("Playit did not return a new tunnel id.")?;
@@ -562,6 +571,50 @@ fn server_port(path: &Path) -> u16 {
                 .find_map(|line| line.strip_prefix("server-port=")?.trim().parse().ok())
         })
         .unwrap_or(25565)
+}
+
+const PLAYIT_REGIONS: &[&str] = &[
+    "global",
+    "north-america",
+    "europe",
+    "asia",
+    "india",
+    "south-america",
+    "chile",
+    "seattle-washington",
+    "los-angeles-california",
+    "denver-colorado",
+    "dallas-texas",
+    "chicago-illinois",
+    "new-york",
+    "united-kingdom",
+    "germany",
+    "sweden",
+    "poland",
+    "romania",
+    "japan",
+    "australia",
+];
+
+fn tunnel_region_path(directory: &Path) -> PathBuf {
+    directory.join(".crewship-tunnel.json")
+}
+
+fn tunnel_region(directory: &Path) -> String {
+    fs::read_to_string(tunnel_region_path(directory))
+        .ok()
+        .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
+        .and_then(|value| value.get("region").and_then(Value::as_str).map(str::to_owned))
+        .filter(|region| PLAYIT_REGIONS.contains(&region.as_str()))
+        .unwrap_or_else(|| "global".into())
+}
+
+fn save_tunnel_region(directory: &Path, region: &str) -> Result<(), String> {
+    if !PLAYIT_REGIONS.contains(&region) {
+        return Err("Choose a supported Playit region.".into());
+    }
+    fs::write(tunnel_region_path(directory), serde_json::json!({ "region": region }).to_string())
+        .map_err(|error| format!("Could not save Playit region: {error}"))
 }
 
 fn first_available_port(servers_dir: &Path) -> u16 {
@@ -1066,7 +1119,8 @@ fn send_server_command(
 #[tauri::command]
 fn server_address(app: AppHandle, id: String) -> Result<ServerAddress, String> {
     safe_id(&id)?;
-    let properties = app_servers_dir(&app)?.join(&id).join("server.properties");
+    let directory = app_servers_dir(&app)?.join(&id);
+    let properties = directory.join("server.properties");
     let port = server_port(&properties);
     Ok(ServerAddress {
         lan_address: local_ip().map(|address| format!("{address}:{port}")),
@@ -1076,6 +1130,7 @@ fn server_address(app: AppHandle, id: String) -> Result<ServerAddress, String> {
             .filter(|v| !v.is_empty()),
         port,
         playit_configured: configured_playit_secret(&app)?.is_some(),
+        tunnel_region: tunnel_region(&directory),
     })
 }
 
@@ -1088,6 +1143,46 @@ fn save_public_address(app: AppHandle, id: String, address: String) -> Result<()
         return Err("Server folder is missing.".into());
     }
     fs::write(directory.join(".crewship-public-address"), address).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_tunnel_region(app: AppHandle, id: String, region: String) -> Result<(), String> {
+    safe_id(&id)?;
+    let directory = app_servers_dir(&app)?.join(&id);
+    if !directory.is_dir() {
+        return Err("Server folder is missing.".into());
+    }
+    save_tunnel_region(&directory, region.trim())
+}
+
+#[tauri::command]
+async fn test_public_address(app: AppHandle, id: String) -> Result<PublicAddressProbe, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        safe_id(&id)?;
+        let directory = app_servers_dir(&app)?.join(&id);
+        let address = fs::read_to_string(directory.join(".crewship-public-address"))
+            .ok()
+            .and_then(|value| runtime::public_address(&value).ok())
+            .filter(|value| !value.is_empty())
+            .ok_or("Save the Playit address first. Use the full hostname and port Playit provides.")?;
+        let (host, port) = address.rsplit_once(':')
+            .and_then(|(host, port)| port.parse::<u16>().ok().map(|port| (host, port)))
+            .unwrap_or((address.as_str(), 25565));
+        let endpoints = format!("{host}:{port}").to_socket_addrs()
+            .map_err(|_| "The public hostname could not be resolved. Check the address copied from Playit.")?;
+        let reachable = endpoints
+            .filter_map(|endpoint| TcpStream::connect_timeout(&endpoint, Duration::from_secs(5)).ok())
+            .next()
+            .is_some();
+        Ok(PublicAddressProbe {
+            reachable,
+            message: if reachable {
+                "The public tunnel accepted a TCP connection. Your friend can try this exact address now.".into()
+            } else {
+                "The public address did not accept a connection. Confirm the Playit agent is running, the tunnel is enabled, and its local target is 127.0.0.1 on this server's port.".into()
+            },
+        })
+    }).await.map_err(|error| format!("Public tunnel test failed: {error}"))?
 }
 
 fn read_log_stream<R: std::io::Read + Send + 'static>(
@@ -1185,6 +1280,7 @@ fn start_server(
         &config.id,
         &config.software,
         server_port(&directory.join("server.properties")),
+        &tunnel_region(&directory),
     ) {
         let _ = fs::write(directory.join(".crewship-public-address"), address);
     }
@@ -1911,6 +2007,8 @@ pub fn run() {
             save_server_settings,
             server_address,
             save_public_address,
+            set_tunnel_region,
+            test_public_address,
             list_backups,
             create_backup,
             backups_directory,
