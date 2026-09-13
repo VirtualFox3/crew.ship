@@ -390,69 +390,6 @@ fn playit_api(path: &str, authorization: Option<&str>, body: Value) -> Result<Va
     Err(detail.to_owned())
 }
 
-/// Apply a Playit login token and retain its session cookie.
-/// Third-party setup codes can be rejected with InvalidSignature here; do not
-/// disguise an unsupported exchange as an expired code.
-fn apply_playit_setup_code(code: &str) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|error| format!("Could not prepare the Playit connection: {error}"))?;
-    let response = client
-        .post(format!("{PLAYIT_API}/login/apply"))
-        .header("x-ref-track", "||")
-        .header("x-web-version", "main-14978a0")
-        .json(&serde_json::json!({ "token": code }))
-        .send()
-        .map_err(|error| format!("Playit is unavailable: {error}"))?;
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-        let payload = response.json::<Value>().unwrap_or(Value::Null);
-        return Err(playit_login_error(status, &payload));
-    }
-    let cookie = response
-        .headers()
-        .get_all(reqwest::header::SET_COOKIE)
-        .iter()
-        .filter_map(|header| header.to_str().ok())
-        .find_map(|header| header.split(';').next())
-        .filter(|value| value.contains('='))
-        .map(str::to_owned)
-        .ok_or("Playit accepted the setup code but did not return an account session. Generate a fresh code and try again.")?;
-    Ok(cookie)
-}
-
-fn playit_login_error(status: u16, payload: &Value) -> String {
-    if payload.pointer("/data/message").and_then(Value::as_str) == Some("InvalidSignature") {
-        return "Playit rejected this code type (InvalidSignature). Crew.Ship's setup-code exchange needs updating; generating another code will not fix this. Use an existing agent secret for now.".into();
-    }
-    match status {
-        401 => "Playit could not authenticate this code. The account was not linked.".into(),
-        429 => "Playit is temporarily rate-limiting requests. Wait a minute before trying again.".into(),
-        status => format!("Playit could not complete this request (HTTP {status}). Try again shortly."),
-    }
-}
-
-#[cfg(test)]
-mod playit_login_tests {
-    use super::*;
-
-    #[test]
-    fn signature_failure_is_not_reported_as_expiration() {
-        let payload = serde_json::json!({ "status": "error", "data": { "type": "auth", "message": "InvalidSignature" } });
-        let message = playit_login_error(401, &payload);
-        assert!(message.contains("InvalidSignature"));
-        assert!(!message.contains("expired"));
-    }
-
-    #[test]
-    fn error_messages_do_not_expose_response_secrets() {
-        let payload = serde_json::json!({ "data": { "message": "private-token-value" } });
-        assert!(!playit_login_error(401, &payload).contains("private-token-value"));
-        assert!(playit_login_error(429, &Value::Null).contains("rate-limiting"));
-    }
-}
-
 fn claim_code() -> String {
     let mut bytes = [0u8; 5];
     rand::thread_rng().fill_bytes(&mut bytes);
@@ -1824,27 +1761,6 @@ fn configure_playit(
         .map_err(|error| format!("Could not save the local Playit agent secret: {error}"))
 }
 
-/// Accept the short-lived code from Playit's “Third Party App” browser flow.
-/// The returned session is saved only in Crew.Ship's local app-data folder.
-#[tauri::command]
-async fn configure_playit_setup_code(app: AppHandle, code: String) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || save_playit_setup_code(&app, &code))
-        .await
-        .map_err(|error| format!("The Playit connection task failed: {error}"))?
-}
-
-fn save_playit_setup_code(app: &AppHandle, code: &str) -> Result<bool, String> {
-    let code = code.trim();
-    if code.len() < 8 || code.len() > 512 {
-        return Err("Paste the one-time setup code shown by Playit, not your password or public address.".into());
-    }
-    let session_cookie = apply_playit_setup_code(code)?;
-    let path = playit_session_path(app)?;
-    fs::write(&path, serde_json::json!({ "session_cookie": session_cookie }).to_string())
-        .map_err(|error| format!("Could not save the local Playit connection: {error}"))?;
-    Ok(true)
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PlayitClaim {
@@ -1856,20 +1772,24 @@ struct PlayitClaim {
 /// account authorization: the first gives Crew.Ship permission to manage
 /// tunnels, while this gives the official agent permission to run here.
 #[tauri::command]
-fn begin_playit_agent_claim() -> PlayitClaim {
-    let code = claim_code();
-    PlayitClaim {
-        url: format!("https://playit.gg/claim/{code}"),
-        code,
-    }
+async fn begin_playit_agent_claim() -> Result<PlayitClaim, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let code = claim_code();
+        let setup = playit_api("/claim/setup", None, serde_json::json!({
+            "code": code, "agent_type": "self-managed", "version": "Crew.Ship"
+        }))?;
+        playit_claim_accepted(&setup)?;
+        Ok(PlayitClaim { url: format!("https://playit.gg/claim/{code}"), code })
+    }).await.map_err(|error| format!("Playit link task failed: {error}"))?
 }
 
 #[tauri::command]
-fn finish_playit_agent_claim(
-    app: AppHandle,
-    code: String,
-    state: State<'_, HostState>,
-) -> Result<bool, String> {
+async fn finish_playit_agent_claim(app: AppHandle, code: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || finish_playit_claim(&app, &code))
+        .await.map_err(|error| format!("Playit link task failed: {error}"))?
+}
+
+fn finish_playit_claim(app: &AppHandle, code: &str) -> Result<bool, String> {
     let code = code.trim();
     if code.len() != 10 || !code.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("That Crew.Ship agent link has expired. Start a new link and approve it in Playit.".into());
@@ -1879,21 +1799,42 @@ fn finish_playit_agent_claim(
         None,
         serde_json::json!({ "code": code, "agent_type": "self-managed", "version": "Crew.Ship" }),
     )?;
-    let status = setup.as_str().unwrap_or_default();
-    if status != "UserAccepted" {
-        return Err(match status {
-            "UserRejected" => "Playit rejected this local agent link. Start a new link if that was a mistake.".into(),
-            _ => "Approve the Crew.Ship agent in the Playit browser tab, then select CHECK APPROVAL again.".into(),
-        });
-    }
+    if !playit_claim_accepted(&setup)? { return Ok(false); }
     let exchange = playit_api("/claim/exchange", None, serde_json::json!({ "code": code }))?;
     let secret = exchange
         .get("secret_key")
         .and_then(Value::as_str)
         .filter(|value| playit_secret_is_valid(value))
         .ok_or("Playit did not return a valid local-agent key. Start a new link and try again.")?;
-    configure_playit(app.clone(), secret.to_owned(), state)?;
-    start_playit_process(&app, None, &app.state::<HostState>())
+    configure_playit(app.clone(), secret.to_owned(), app.state::<HostState>())?;
+    Ok(true)
+}
+
+fn playit_claim_accepted(setup: &Value) -> Result<bool, String> {
+    match setup.as_str() {
+        Some("UserAccepted") => Ok(true),
+        Some("WaitingForUserVisit" | "WaitingForUser") => Ok(false),
+        Some("UserRejected") => Err("Playit rejected this link. Start a new link to try again.".into()),
+        _ => Err("Playit returned an unexpected approval status. Start a new link to try again.".into()),
+    }
+}
+
+#[cfg(test)]
+mod playit_claim_tests {
+    use super::*;
+    #[test]
+    fn only_accepted_claims_can_exchange_a_key() {
+        for status in ["WaitingForUserVisit", "WaitingForUser"] {
+            assert_eq!(playit_claim_accepted(&serde_json::json!(status)), Ok(false));
+        }
+        assert_eq!(playit_claim_accepted(&serde_json::json!("UserAccepted")), Ok(true));
+    }
+    #[test]
+    fn rejected_and_unrecognized_claims_fail_closed() {
+        for value in [serde_json::json!("UserRejected"), serde_json::json!("unknown"), Value::Null, serde_json::json!(true)] {
+            assert!(playit_claim_accepted(&value).is_err());
+        }
+    }
 }
 
 #[tauri::command]
@@ -1984,7 +1925,6 @@ pub fn run() {
             install_modrinth_addon,
             start_playit,
             configure_playit,
-            configure_playit_setup_code,
             begin_playit_agent_claim,
             finish_playit_agent_claim,
             disconnect_playit,
