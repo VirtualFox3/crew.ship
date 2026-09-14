@@ -41,6 +41,7 @@ struct ManagedServer {
     stdin: Option<ChildStdin>,
     logs: Arc<Mutex<VecDeque<String>>>,
     ready: Arc<std::sync::atomic::AtomicBool>,
+    port: u16,
     stopping: bool,
 }
 
@@ -571,6 +572,14 @@ fn server_port(path: &Path) -> u16 {
                 .find_map(|line| line.strip_prefix("server-port=")?.trim().parse().ok())
         })
         .unwrap_or(25565)
+}
+
+fn local_server_is_listening(port: u16) -> bool {
+    TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_millis(150),
+    )
+    .is_ok()
 }
 
 const PLAYIT_REGIONS: &[&str] = &[
@@ -1389,6 +1398,7 @@ fn start_server(
             stdin,
             logs: Arc::clone(&logs),
             ready: Arc::clone(&ready),
+            port: server_port(&directory.join("server.properties")),
             stopping: false,
         },
     );
@@ -1414,7 +1424,9 @@ fn start_server(
     }
     Ok(ProcessStatus {
         running,
-        ready: running && ready.load(std::sync::atomic::Ordering::Relaxed),
+        ready: running
+            && (ready.load(std::sync::atomic::Ordering::Relaxed)
+                || local_server_is_listening(server_port(&directory.join("server.properties")))),
         exit_code,
     })
 }
@@ -1735,13 +1747,15 @@ fn server_status(id: String, state: State<'_, HostState>) -> Result<ProcessStatu
         });
     };
     let exit = server.child.try_wait().map_err(|error| error.to_string())?;
-    Ok(ProcessStatus {
-        running: exit.is_none(),
-        ready: exit.is_none()
-            && !server.stopping
-            && server.ready.load(std::sync::atomic::Ordering::Relaxed),
-        exit_code: exit.and_then(|status| status.code()),
-    })
+    let running = exit.is_none();
+    let ready = running
+        && !server.stopping
+        && (server.ready.load(std::sync::atomic::Ordering::Relaxed)
+            || local_server_is_listening(server.port));
+    if ready {
+        server.ready.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(ProcessStatus { running, ready, exit_code: exit.and_then(|status| status.code()) })
 }
 
 #[tauri::command]
