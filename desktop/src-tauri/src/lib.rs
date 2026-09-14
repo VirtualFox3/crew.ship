@@ -442,6 +442,18 @@ fn playit_secret_value(app: &AppHandle) -> Result<Option<String>, String> {
     Ok(playit_secret_is_valid(&key).then_some(key))
 }
 
+fn verify_playit_agent_secret(secret: &str) -> Result<(), String> {
+    playit_api(
+        "/agents/rundata",
+        Some(&format!("Agent-Secret {secret}")),
+        serde_json::json!({}),
+    )
+    .map(|_| ())
+    .map_err(|_| {
+        "This Playit agent key is no longer valid. Link this computer again, then assign the tunnel to the newly linked agent in Playit.".into()
+    })
+}
+
 fn playit_endpoint(tunnel: &Value) -> Option<String> {
     for key in ["display_address", "assigned_domain", "custom_domain", "public_address"] {
         if let Some(value) = tunnel.get(key).and_then(Value::as_str).filter(|value| !value.is_empty()) {
@@ -1817,6 +1829,13 @@ fn start_playit_process(
         return Err("The selected playit.gg executable does not exist.".into());
     }
     let secret_path = configured_playit_secret(app)?.ok_or("Playit needs an agent secret before it can connect. In Playit, create or select an agent on this computer, copy its agent secret, then paste it in Crew.Ship Host settings. Your Playit password is never needed here.")?;
+    let secret = fs::read_to_string(&secret_path)
+        .map_err(|error| format!("Could not read the local Playit agent key: {error}"))?;
+    let secret = secret.trim().strip_prefix("secret_key = ")
+        .and_then(|value| value.trim().strip_prefix('"'))
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(secret.trim());
+    verify_playit_agent_secret(secret)?;
 
     let mut playit = state.playit.lock().map_err(|_| "State lock failed.")?;
     if let Some(process) = playit.as_mut() {
@@ -1857,6 +1876,7 @@ fn configure_playit(
     if !playit_secret_is_valid(secret) {
         return Err("That does not look like a Playit agent secret. Paste the hexadecimal agent secret from Playit, not your Playit password or public server address.".into());
     }
+    verify_playit_agent_secret(secret)?;
     if let Some(mut process) = state
         .playit
         .lock()
