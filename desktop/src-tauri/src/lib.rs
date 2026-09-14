@@ -5,7 +5,7 @@ use rand::RngCore;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
@@ -592,6 +592,62 @@ fn local_server_is_listening(port: u16) -> bool {
         Duration::from_millis(150),
     )
     .is_ok()
+}
+
+fn write_varint(mut value: usize, output: &mut Vec<u8>) {
+    loop {
+        let mut byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        output.push(byte);
+        if value == 0 {
+            return;
+        }
+    }
+}
+
+fn read_varint(stream: &mut TcpStream) -> Result<usize, String> {
+    let mut value = 0usize;
+    for shift in (0..35).step_by(7) {
+        let mut byte = [0u8; 1];
+        stream.read_exact(&mut byte).map_err(|_| "The address closed before responding as a Minecraft server.")?;
+        value |= usize::from(byte[0] & 0x7f) << shift;
+        if byte[0] & 0x80 == 0 {
+            return Ok(value);
+        }
+    }
+    Err("The public address returned an invalid Minecraft response.".into())
+}
+
+fn minecraft_status_response(stream: &mut TcpStream, host: &str, port: u16) -> Result<(), String> {
+    stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|error| error.to_string())?;
+    stream.set_write_timeout(Some(Duration::from_secs(5))).map_err(|error| error.to_string())?;
+    let mut handshake = Vec::new();
+    write_varint(0, &mut handshake);
+    write_varint(0, &mut handshake);
+    write_varint(host.len(), &mut handshake);
+    handshake.extend_from_slice(host.as_bytes());
+    handshake.extend_from_slice(&port.to_be_bytes());
+    write_varint(1, &mut handshake);
+    let mut request = Vec::new();
+    write_varint(handshake.len(), &mut request);
+    request.extend_from_slice(&handshake);
+    request.extend_from_slice(&[1, 0]);
+    stream.write_all(&request).map_err(|_| "The address did not accept a Minecraft status request.")?;
+    let packet_length = read_varint(stream)?;
+    if packet_length == 0 || packet_length > 1_048_576 || read_varint(stream)? != 0 {
+        return Err("The public address did not return a Minecraft status response.".into());
+    }
+    let json_length = read_varint(stream)?;
+    if json_length == 0 || json_length > packet_length {
+        return Err("The public address returned an invalid Minecraft status response.".into());
+    }
+    let mut json = vec![0; json_length];
+    stream.read_exact(&mut json).map_err(|_| "The public address returned an incomplete Minecraft status response.")?;
+    serde_json::from_slice::<Value>(&json).map_err(|_| "The public address did not return Minecraft status data.")?;
+    Ok(())
 }
 
 const PLAYIT_REGIONS: &[&str] = &[
@@ -1191,16 +1247,20 @@ async fn test_public_address(app: AppHandle, id: String) -> Result<PublicAddress
             .unwrap_or((address.as_str(), 25565));
         let endpoints = format!("{host}:{port}").to_socket_addrs()
             .map_err(|_| "The public hostname could not be resolved. Check the address copied from Playit.")?;
-        let reachable = endpoints
-            .filter_map(|endpoint| TcpStream::connect_timeout(&endpoint, Duration::from_secs(5)).ok())
-            .next()
-            .is_some();
+        let mut failure = "The public hostname could not be reached.".to_owned();
+        let reachable = endpoints.filter_map(|endpoint| {
+            let mut stream = TcpStream::connect_timeout(&endpoint, Duration::from_secs(5)).ok()?;
+            match minecraft_status_response(&mut stream, host, port) {
+                Ok(()) => Some(true),
+                Err(message) => { failure = message; None }
+            }
+        }).next().is_some();
         Ok(PublicAddressProbe {
             reachable,
             message: if reachable {
-                "The public tunnel accepted a TCP connection. Your friend can try this exact address now.".into()
+                "The public address returned a Minecraft status response. Your friend can try this exact address now.".into()
             } else {
-                "The public address did not accept a connection. Confirm the Playit agent is running, the tunnel is enabled, and its local target is 127.0.0.1 on this server's port.".into()
+                format!("{failure} Confirm the Playit agent is online, the tunnel is enabled, and its local target is 127.0.0.1 on this server's port.")
             },
         })
     }).await.map_err(|error| format!("Public tunnel test failed: {error}"))?
