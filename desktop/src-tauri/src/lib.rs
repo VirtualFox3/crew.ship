@@ -5,7 +5,8 @@ use rand::RngCore;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
+    net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{Arc, Mutex},
@@ -40,6 +41,7 @@ struct ManagedServer {
     stdin: Option<ChildStdin>,
     logs: Arc<Mutex<VecDeque<String>>>,
     ready: Arc<std::sync::atomic::AtomicBool>,
+    port: u16,
     stopping: bool,
 }
 
@@ -94,6 +96,14 @@ struct ServerAddress {
     public_address: Option<String>,
     port: u16,
     playit_configured: bool,
+    tunnel_region: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PublicAddressProbe {
+    reachable: bool,
+    message: String,
 }
 
 #[derive(Serialize)]
@@ -390,39 +400,6 @@ fn playit_api(path: &str, authorization: Option<&str>, body: Value) -> Result<Va
     Err(detail.to_owned())
 }
 
-/// Playit's third-party setup code signs a client in with a Set-Cookie header.
-/// Their browser client relies on that cookie rather than a JSON session key.
-fn apply_playit_setup_code(code: &str) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|error| format!("Could not prepare the Playit connection: {error}"))?;
-    let response = client
-        .post(format!("{PLAYIT_API}/login/apply"))
-        .header("x-ref-track", "||")
-        .header("x-web-version", "main-14978a0")
-        .json(&serde_json::json!({ "token": code }))
-        .send()
-        .map_err(|error| format!("Playit is unavailable: {error}"))?;
-    if !response.status().is_success() {
-        return Err(match response.status().as_u16() {
-            401 => "That Playit setup code is invalid or expired. Generate a new Third Party App code in Playit, then paste it into Crew.Ship immediately.".into(),
-            429 => "Playit is temporarily rate-limiting requests. Wait a minute, generate a fresh setup code, then try again.".into(),
-            status => format!("Playit could not complete this request (HTTP {status}). Try again shortly."),
-        });
-    }
-    let cookie = response
-        .headers()
-        .get_all(reqwest::header::SET_COOKIE)
-        .iter()
-        .filter_map(|header| header.to_str().ok())
-        .find_map(|header| header.split(';').next())
-        .filter(|value| value.contains('='))
-        .map(str::to_owned)
-        .ok_or("Playit accepted the setup code but did not return an account session. Generate a fresh code and try again.")?;
-    Ok(cookie)
-}
-
 fn claim_code() -> String {
     let mut bytes = [0u8; 5];
     rand::thread_rng().fill_bytes(&mut bytes);
@@ -465,6 +442,18 @@ fn playit_secret_value(app: &AppHandle) -> Result<Option<String>, String> {
     Ok(playit_secret_is_valid(&key).then_some(key))
 }
 
+fn verify_playit_agent_secret(secret: &str) -> Result<(), String> {
+    playit_api(
+        "/agents/rundata",
+        Some(&format!("Agent-Secret {secret}")),
+        serde_json::json!({}),
+    )
+    .map(|_| ())
+    .map_err(|_| {
+        "This Playit agent key is no longer valid. Link this computer again, then assign the tunnel to the newly linked agent in Playit.".into()
+    })
+}
+
 fn playit_endpoint(tunnel: &Value) -> Option<String> {
     for key in ["display_address", "assigned_domain", "custom_domain", "public_address"] {
         if let Some(value) = tunnel.get(key).and_then(Value::as_str).filter(|value| !value.is_empty()) {
@@ -481,7 +470,7 @@ fn playit_endpoint(tunnel: &Value) -> Option<String> {
 }
 
 /// Best-effort account-side provisioning. Failure must never stop local play.
-fn provision_playit_tunnel(app: &AppHandle, server_id: &str, software: &str, port: u16) -> Result<Option<String>, String> {
+fn provision_playit_tunnel(app: &AppHandle, server_id: &str, software: &str, port: u16, region: &str) -> Result<Option<String>, String> {
     let Some(session_key) = configured_playit_session(app)? else { return Ok(None); };
     let Some(agent_secret) = playit_secret_value(app)? else { return Ok(None); };
     let agent = playit_api("/agents/rundata", Some(&format!("Agent-Secret {agent_secret}")), serde_json::json!({}))?;
@@ -510,7 +499,7 @@ fn provision_playit_tunnel(app: &AppHandle, server_id: &str, software: &str, por
         "port_type": "tcp", "port_count": 1,
         "origin": { "type": "agent", "data": { "agent_id": agent_id, "local_ip": "127.0.0.1", "local_port": port } },
         "enabled": true,
-        "alloc": { "type": "region", "details": { "region": "global" } },
+        "alloc": { "type": "region", "details": { "region": region } },
         "firewall_id": null, "proxy_protocol": null
     }))?;
     let id = created.get("id").and_then(Value::as_str).ok_or("Playit did not return a new tunnel id.")?;
@@ -595,6 +584,114 @@ fn server_port(path: &Path) -> u16 {
                 .find_map(|line| line.strip_prefix("server-port=")?.trim().parse().ok())
         })
         .unwrap_or(25565)
+}
+
+fn local_server_is_listening(port: u16) -> bool {
+    TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        Duration::from_millis(150),
+    )
+    .is_ok()
+}
+
+fn write_varint(mut value: usize, output: &mut Vec<u8>) {
+    loop {
+        let mut byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value != 0 {
+            byte |= 0x80;
+        }
+        output.push(byte);
+        if value == 0 {
+            return;
+        }
+    }
+}
+
+fn read_varint(stream: &mut TcpStream) -> Result<usize, String> {
+    let mut value = 0usize;
+    for shift in (0..35).step_by(7) {
+        let mut byte = [0u8; 1];
+        stream.read_exact(&mut byte).map_err(|_| "The address closed before responding as a Minecraft server.")?;
+        value |= usize::from(byte[0] & 0x7f) << shift;
+        if byte[0] & 0x80 == 0 {
+            return Ok(value);
+        }
+    }
+    Err("The public address returned an invalid Minecraft response.".into())
+}
+
+fn minecraft_status_response(stream: &mut TcpStream, host: &str, port: u16) -> Result<(), String> {
+    stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|error| error.to_string())?;
+    stream.set_write_timeout(Some(Duration::from_secs(5))).map_err(|error| error.to_string())?;
+    let mut handshake = Vec::new();
+    write_varint(0, &mut handshake);
+    write_varint(0, &mut handshake);
+    write_varint(host.len(), &mut handshake);
+    handshake.extend_from_slice(host.as_bytes());
+    handshake.extend_from_slice(&port.to_be_bytes());
+    write_varint(1, &mut handshake);
+    let mut request = Vec::new();
+    write_varint(handshake.len(), &mut request);
+    request.extend_from_slice(&handshake);
+    request.extend_from_slice(&[1, 0]);
+    stream.write_all(&request).map_err(|_| "The address did not accept a Minecraft status request.")?;
+    let packet_length = read_varint(stream)?;
+    if packet_length == 0 || packet_length > 1_048_576 || read_varint(stream)? != 0 {
+        return Err("The public address did not return a Minecraft status response.".into());
+    }
+    let json_length = read_varint(stream)?;
+    if json_length == 0 || json_length > packet_length {
+        return Err("The public address returned an invalid Minecraft status response.".into());
+    }
+    let mut json = vec![0; json_length];
+    stream.read_exact(&mut json).map_err(|_| "The public address returned an incomplete Minecraft status response.")?;
+    serde_json::from_slice::<Value>(&json).map_err(|_| "The public address did not return Minecraft status data.")?;
+    Ok(())
+}
+
+const PLAYIT_REGIONS: &[&str] = &[
+    "global",
+    "north-america",
+    "europe",
+    "asia",
+    "india",
+    "south-america",
+    "chile",
+    "seattle-washington",
+    "los-angeles-california",
+    "denver-colorado",
+    "dallas-texas",
+    "chicago-illinois",
+    "new-york",
+    "united-kingdom",
+    "germany",
+    "sweden",
+    "poland",
+    "romania",
+    "japan",
+    "australia",
+];
+
+fn tunnel_region_path(directory: &Path) -> PathBuf {
+    directory.join(".crewship-tunnel.json")
+}
+
+fn tunnel_region(directory: &Path) -> String {
+    fs::read_to_string(tunnel_region_path(directory))
+        .ok()
+        .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
+        .and_then(|value| value.get("region").and_then(Value::as_str).map(str::to_owned))
+        .filter(|region| PLAYIT_REGIONS.contains(&region.as_str()))
+        .unwrap_or_else(|| "global".into())
+}
+
+fn save_tunnel_region(directory: &Path, region: &str) -> Result<(), String> {
+    if !PLAYIT_REGIONS.contains(&region) {
+        return Err("Choose a supported Playit region.".into());
+    }
+    fs::write(tunnel_region_path(directory), serde_json::json!({ "region": region }).to_string())
+        .map_err(|error| format!("Could not save Playit region: {error}"))
 }
 
 fn first_available_port(servers_dir: &Path) -> u16 {
@@ -1099,7 +1196,8 @@ fn send_server_command(
 #[tauri::command]
 fn server_address(app: AppHandle, id: String) -> Result<ServerAddress, String> {
     safe_id(&id)?;
-    let properties = app_servers_dir(&app)?.join(&id).join("server.properties");
+    let directory = app_servers_dir(&app)?.join(&id);
+    let properties = directory.join("server.properties");
     let port = server_port(&properties);
     Ok(ServerAddress {
         lan_address: local_ip().map(|address| format!("{address}:{port}")),
@@ -1109,6 +1207,7 @@ fn server_address(app: AppHandle, id: String) -> Result<ServerAddress, String> {
             .filter(|v| !v.is_empty()),
         port,
         playit_configured: configured_playit_secret(&app)?.is_some(),
+        tunnel_region: tunnel_region(&directory),
     })
 }
 
@@ -1121,6 +1220,50 @@ fn save_public_address(app: AppHandle, id: String, address: String) -> Result<()
         return Err("Server folder is missing.".into());
     }
     fs::write(directory.join(".crewship-public-address"), address).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_tunnel_region(app: AppHandle, id: String, region: String) -> Result<(), String> {
+    safe_id(&id)?;
+    let directory = app_servers_dir(&app)?.join(&id);
+    if !directory.is_dir() {
+        return Err("Server folder is missing.".into());
+    }
+    save_tunnel_region(&directory, region.trim())
+}
+
+#[tauri::command]
+async fn test_public_address(app: AppHandle, id: String) -> Result<PublicAddressProbe, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        safe_id(&id)?;
+        let directory = app_servers_dir(&app)?.join(&id);
+        let address = fs::read_to_string(directory.join(".crewship-public-address"))
+            .ok()
+            .and_then(|value| runtime::public_address(&value).ok())
+            .filter(|value| !value.is_empty())
+            .ok_or("Save the Playit address first. Use the full hostname and port Playit provides.")?;
+        let (host, port) = address.rsplit_once(':')
+            .and_then(|(host, port)| port.parse::<u16>().ok().map(|port| (host, port)))
+            .unwrap_or((address.as_str(), 25565));
+        let endpoints = format!("{host}:{port}").to_socket_addrs()
+            .map_err(|_| "The public hostname could not be resolved. Check the address copied from Playit.")?;
+        let mut failure = "The public hostname could not be reached.".to_owned();
+        let reachable = endpoints.filter_map(|endpoint| {
+            let mut stream = TcpStream::connect_timeout(&endpoint, Duration::from_secs(5)).ok()?;
+            match minecraft_status_response(&mut stream, host, port) {
+                Ok(()) => Some(true),
+                Err(message) => { failure = message; None }
+            }
+        }).next().is_some();
+        Ok(PublicAddressProbe {
+            reachable,
+            message: if reachable {
+                "The public address returned a Minecraft status response. Your friend can try this exact address now.".into()
+            } else {
+                format!("{failure} Confirm the Playit agent is online, the tunnel is enabled, and its local target is 127.0.0.1 on this server's port.")
+            },
+        })
+    }).await.map_err(|error| format!("Public tunnel test failed: {error}"))?
 }
 
 fn read_log_stream<R: std::io::Read + Send + 'static>(
@@ -1218,6 +1361,7 @@ fn start_server(
         &config.id,
         &config.software,
         server_port(&directory.join("server.properties")),
+        &tunnel_region(&directory),
     ) {
         let _ = fs::write(directory.join(".crewship-public-address"), address);
     }
@@ -1326,6 +1470,7 @@ fn start_server(
             stdin,
             logs: Arc::clone(&logs),
             ready: Arc::clone(&ready),
+            port: server_port(&directory.join("server.properties")),
             stopping: false,
         },
     );
@@ -1351,7 +1496,9 @@ fn start_server(
     }
     Ok(ProcessStatus {
         running,
-        ready: running && ready.load(std::sync::atomic::Ordering::Relaxed),
+        ready: running
+            && (ready.load(std::sync::atomic::Ordering::Relaxed)
+                || local_server_is_listening(server_port(&directory.join("server.properties")))),
         exit_code,
     })
 }
@@ -1672,13 +1819,15 @@ fn server_status(id: String, state: State<'_, HostState>) -> Result<ProcessStatu
         });
     };
     let exit = server.child.try_wait().map_err(|error| error.to_string())?;
-    Ok(ProcessStatus {
-        running: exit.is_none(),
-        ready: exit.is_none()
-            && !server.stopping
-            && server.ready.load(std::sync::atomic::Ordering::Relaxed),
-        exit_code: exit.and_then(|status| status.code()),
-    })
+    let running = exit.is_none();
+    let ready = running
+        && !server.stopping
+        && (server.ready.load(std::sync::atomic::Ordering::Relaxed)
+            || local_server_is_listening(server.port));
+    if ready {
+        server.ready.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(ProcessStatus { running, ready, exit_code: exit.and_then(|status| status.code()) })
 }
 
 #[tauri::command]
@@ -1740,6 +1889,13 @@ fn start_playit_process(
         return Err("The selected playit.gg executable does not exist.".into());
     }
     let secret_path = configured_playit_secret(app)?.ok_or("Playit needs an agent secret before it can connect. In Playit, create or select an agent on this computer, copy its agent secret, then paste it in Crew.Ship Host settings. Your Playit password is never needed here.")?;
+    let secret = fs::read_to_string(&secret_path)
+        .map_err(|error| format!("Could not read the local Playit agent key: {error}"))?;
+    let secret = secret.trim().strip_prefix("secret_key = ")
+        .and_then(|value| value.trim().strip_prefix('"'))
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(secret.trim());
+    verify_playit_agent_secret(secret)?;
 
     let mut playit = state.playit.lock().map_err(|_| "State lock failed.")?;
     if let Some(process) = playit.as_mut() {
@@ -1780,6 +1936,7 @@ fn configure_playit(
     if !playit_secret_is_valid(secret) {
         return Err("That does not look like a Playit agent secret. Paste the hexadecimal agent secret from Playit, not your Playit password or public server address.".into());
     }
+    verify_playit_agent_secret(secret)?;
     if let Some(mut process) = state
         .playit
         .lock()
@@ -1794,20 +1951,6 @@ fn configure_playit(
         .map_err(|error| format!("Could not save the local Playit agent secret: {error}"))
 }
 
-/// Accept the short-lived code from Playit's “Third Party App” browser flow.
-/// The returned session is saved only in Crew.Ship's local app-data folder.
-#[tauri::command]
-fn configure_playit_setup_code(app: AppHandle, code: String) -> Result<(), String> {
-    let code = code.trim();
-    if code.len() < 8 || code.len() > 512 {
-        return Err("Paste the one-time setup code shown by Playit, not your password or public address.".into());
-    }
-    let session_cookie = apply_playit_setup_code(code)?;
-    let path = playit_session_path(&app)?;
-    fs::write(&path, serde_json::json!({ "session_cookie": session_cookie }).to_string())
-        .map_err(|error| format!("Could not save the local Playit connection: {error}"))
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PlayitClaim {
@@ -1819,20 +1962,24 @@ struct PlayitClaim {
 /// account authorization: the first gives Crew.Ship permission to manage
 /// tunnels, while this gives the official agent permission to run here.
 #[tauri::command]
-fn begin_playit_agent_claim() -> PlayitClaim {
-    let code = claim_code();
-    PlayitClaim {
-        url: format!("https://playit.gg/claim/{code}"),
-        code,
-    }
+async fn begin_playit_agent_claim() -> Result<PlayitClaim, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let code = claim_code();
+        let setup = playit_api("/claim/setup", None, serde_json::json!({
+            "code": code, "agent_type": "self-managed", "version": "Crew.Ship"
+        }))?;
+        playit_claim_accepted(&setup)?;
+        Ok(PlayitClaim { url: format!("https://playit.gg/claim/{code}"), code })
+    }).await.map_err(|error| format!("Playit link task failed: {error}"))?
 }
 
 #[tauri::command]
-fn finish_playit_agent_claim(
-    app: AppHandle,
-    code: String,
-    state: State<'_, HostState>,
-) -> Result<bool, String> {
+async fn finish_playit_agent_claim(app: AppHandle, code: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || finish_playit_claim(&app, &code))
+        .await.map_err(|error| format!("Playit link task failed: {error}"))?
+}
+
+fn finish_playit_claim(app: &AppHandle, code: &str) -> Result<bool, String> {
     let code = code.trim();
     if code.len() != 10 || !code.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("That Crew.Ship agent link has expired. Start a new link and approve it in Playit.".into());
@@ -1842,21 +1989,42 @@ fn finish_playit_agent_claim(
         None,
         serde_json::json!({ "code": code, "agent_type": "self-managed", "version": "Crew.Ship" }),
     )?;
-    let status = setup.as_str().unwrap_or_default();
-    if status != "UserAccepted" {
-        return Err(match status {
-            "UserRejected" => "Playit rejected this local agent link. Start a new link if that was a mistake.".into(),
-            _ => "Approve the Crew.Ship agent in the Playit browser tab, then select CHECK APPROVAL again.".into(),
-        });
-    }
+    if !playit_claim_accepted(&setup)? { return Ok(false); }
     let exchange = playit_api("/claim/exchange", None, serde_json::json!({ "code": code }))?;
     let secret = exchange
         .get("secret_key")
         .and_then(Value::as_str)
         .filter(|value| playit_secret_is_valid(value))
         .ok_or("Playit did not return a valid local-agent key. Start a new link and try again.")?;
-    configure_playit(app.clone(), secret.to_owned(), state)?;
-    start_playit_process(&app, None, &app.state::<HostState>())
+    configure_playit(app.clone(), secret.to_owned(), app.state::<HostState>())?;
+    Ok(true)
+}
+
+fn playit_claim_accepted(setup: &Value) -> Result<bool, String> {
+    match setup.as_str() {
+        Some("UserAccepted") => Ok(true),
+        Some("WaitingForUserVisit" | "WaitingForUser") => Ok(false),
+        Some("UserRejected") => Err("Playit rejected this link. Start a new link to try again.".into()),
+        _ => Err("Playit returned an unexpected approval status. Start a new link to try again.".into()),
+    }
+}
+
+#[cfg(test)]
+mod playit_claim_tests {
+    use super::*;
+    #[test]
+    fn only_accepted_claims_can_exchange_a_key() {
+        for status in ["WaitingForUserVisit", "WaitingForUser"] {
+            assert_eq!(playit_claim_accepted(&serde_json::json!(status)), Ok(false));
+        }
+        assert_eq!(playit_claim_accepted(&serde_json::json!("UserAccepted")), Ok(true));
+    }
+    #[test]
+    fn rejected_and_unrecognized_claims_fail_closed() {
+        for value in [serde_json::json!("UserRejected"), serde_json::json!("unknown"), Value::Null, serde_json::json!(true)] {
+            assert!(playit_claim_accepted(&value).is_err());
+        }
+    }
 }
 
 #[tauri::command]
@@ -1933,6 +2101,8 @@ pub fn run() {
             save_server_settings,
             server_address,
             save_public_address,
+            set_tunnel_region,
+            test_public_address,
             list_backups,
             create_backup,
             backups_directory,
@@ -1947,7 +2117,6 @@ pub fn run() {
             install_modrinth_addon,
             start_playit,
             configure_playit,
-            configure_playit_setup_code,
             begin_playit_agent_claim,
             finish_playit_agent_claim,
             disconnect_playit,
